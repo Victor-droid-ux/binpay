@@ -1,0 +1,177 @@
+# API Testing Examples
+
+# Health Check
+GET http://localhost:5000/health
+
+###
+
+# Register User
+POST http://localhost:5000/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "phone": "+2348012345678",
+  "password": "Password123!",
+  "firstName": "John",
+  "lastName": "Doe"
+}
+
+###
+
+# Login User
+POST http://localhost:5000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Password123!"
+}
+
+###
+
+# Get Current User (Replace TOKEN with actual JWT)
+GET http://localhost:5000/api/auth/me
+Authorization: Bearer TOKEN
+
+###
+
+# Get All States
+GET http://localhost:5000/api/admin/states
+
+###
+
+# Get State Details
+GET http://localhost:5000/api/admin/states/lagos
+
+###
+
+# Register Bin (Replace TOKEN and lgaId)
+POST http://localhost:5000/api/bills/bins/register
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{
+  "binId": "LA123456",
+  "lgaId": "uuid-of-lga",
+  "address": "123 Test Street, Ikeja, Lagos"
+}
+
+###
+
+# Get User's Bins
+GET http://localhost:5000/api/bills/bins
+Authorization: Bearer TOKEN
+
+###
+
+# Lookup Bill
+GET http://localhost:5000/api/bills/lookup/LA123456
+Authorization: Bearer TOKEN
+
+###
+
+# Get User Bills
+GET http://localhost:5000/api/bills?status=PENDING&page=1&limit=10
+Authorization: Bearer TOKEN
+
+###
+
+# Initialize Payment (Replace TOKEN and billId)
+POST http://localhost:5000/api/payments/initialize
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{
+  "billId": "uuid-of-bill",
+  "method": "CARD"
+}
+
+###
+
+# Verify Payment
+GET http://localhost:5000/api/payments/verify/BP-1234567890-abc123
+Authorization: Bearer TOKEN
+
+###
+
+# Get Payment History
+GET http://localhost:5000/api/payments/history?page=1&limit=10
+Authorization: Bearer TOKEN
+
+###
+
+# STATE ADMIN - Login
+POST http://localhost:5000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@lagos.binpay.ng",
+  "password": "Admin123!@#"
+}
+
+###
+
+# STATE ADMIN - Get Statistics
+GET http://localhost:5000/api/admin/stats/lagos
+Authorization: Bearer STATE_ADMIN_TOKEN
+
+###
+
+# STATE ADMIN - Get Bills
+GET http://localhost:5000/api/admin/bills/lagos?page=1&limit=20
+Authorization: Bearer STATE_ADMIN_TOKEN
+
+###
+
+# STATE ADMIN - Create Bill
+POST http://localhost:5000/api/bills
+Authorization: Bearer STATE_ADMIN_TOKEN
+Content-Type: application/json
+
+{
+  "binRegistrationId": "uuid-of-bin-registration",
+  "amount": 750000,
+  "dueDate": "2024-03-15T00:00:00Z",
+  "billingPeriod": "March 2024",
+  "description": "Monthly waste collection bill"
+}
+
+###
+
+# SUPER ADMIN - Login
+POST http://localhost:5000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@binpay.ng",
+  "password": "Admin123!@#"
+}
+
+###
+
+# SUPER ADMIN - Get Platform Stats
+GET http://localhost:5000/api/admin/super/stats
+Authorization: Bearer SUPER_ADMIN_TOKEN
+
+###
+
+# SUPER ADMIN - Get State Admins
+GET http://localhost:5000/api/admin/super/state-admins
+Authorization: Bearer SUPER_ADMIN_TOKEN
+
+###
+
+# SUPER ADMIN - Create State Admin
+POST http://localhost:5000/api/admin/super/state-admins
+Authorization: Bearer SUPER_ADMIN_TOKEN
+Content-Type: application/json
+
+{
+  "email": "admin@rivers.binpay.ng",
+  "phone": "+2348098765432",
+  "password": "Admin123!@#",
+  "firstName": "Rivers",
+  "lastName": "Admin",
+  "stateCode": "rivers"
+}
