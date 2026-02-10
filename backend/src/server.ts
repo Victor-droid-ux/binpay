@@ -13,6 +13,7 @@ import authRoutes from './routes/auth';
 import billRoutes from './routes/bills';
 import paymentRoutes from './routes/payments';
 import adminRoutes from './routes/admin';
+import infoRoutes from './routes/info';
 
 const app: Application = express();
 const PORT = process.env.PORT || 5000;
@@ -41,6 +42,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/bills', billRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/info', infoRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
