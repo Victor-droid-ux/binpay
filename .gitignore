@@ -20,6 +20,11 @@ coverage/
 .env.test.local
 .env.production.local
 
+# Allow example env files
+!.env.example
+!frontend/.env.example
+!backend/.env.example
+
 # Logs
 logs/
 *.log
