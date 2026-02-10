@@ -102,12 +102,12 @@ Need help? We're here for you!
 
 ### Twilio Credentials Already Set
 
-Your Twilio credentials should be configured in [backend/.env](backend/.env):
+Your Twilio credentials are configured in [backend/.env](backend/.env):
 
 ```env
-TWILIO_ACCOUNT_SID=your_account_sid_here
-TWILIO_AUTH_TOKEN=your_auth_token_here
-TWILIO_PHONE_NUMBER=your_twilio_phone_number
+TWILIO_ACCOUNT_SID=[REDACTED_TWILIO_SID]
+TWILIO_AUTH_TOKEN=b528a7ede7e4f97332193cd04fe0213b
+TWILIO_PHONE_NUMBER=+13203146761
 ```
 
 ### Phone Number Format
@@ -320,9 +320,9 @@ Allow users to opt-in/opt-out of SMS notifications in profile settings
 **Check 1:** Verify Twilio credentials
 ```bash
 # In backend/.env
-TWILIO_ACCOUNT_SID=your_account_sid_here
-TWILIO_AUTH_TOKEN=your_auth_token_here
-TWILIO_PHONE_NUMBER=your_twilio_phone_number
+TWILIO_ACCOUNT_SID=[REDACTED_TWILIO_SID]
+TWILIO_AUTH_TOKEN=b528a7ede7e4f97332193cd04fe0213b
+TWILIO_PHONE_NUMBER=+13203146761
 ```
 
 **Check 2:** Restart backend server
