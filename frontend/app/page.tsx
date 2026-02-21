@@ -119,7 +119,7 @@ export default function HomePage() {
       </section>
 
       {/* Supported States */}
-      <section className="container mx-auto px-4 py-16 bg-white rounded-lg mx-4 shadow-sm">
+      <section className="container mx-auto px-4 py-16 bg-white rounded-lg shadow-sm">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">Supported States & Authorities</h2>
           <p className="text-gray-600">We work with official waste management authorities across Nigeria</p>

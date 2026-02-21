@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from "mongoose";
 
 export interface IBinRegistration extends Document {
   binId: string;
@@ -16,7 +16,7 @@ export interface IBinRegistration extends Document {
 const binRegistrationSchema = new Schema<IBinRegistration>(
   {
     binId: { type: String, required: true, unique: true },
-    userId: { type: Schema.Types.ObjectId, ref: 'User', required: false },
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: false },
     stateCode: { type: String, required: true },
     lgaName: { type: String, required: true },
     address: { type: String, required: true },
@@ -26,11 +26,13 @@ const binRegistrationSchema = new Schema<IBinRegistration>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 binRegistrationSchema.index({ userId: 1 });
-binRegistrationSchema.index({ binId: 1 });
 binRegistrationSchema.index({ stateCode: 1 });
 
-export const BinRegistration = mongoose.model<IBinRegistration>('BinRegistration', binRegistrationSchema);
+export const BinRegistration = mongoose.model<IBinRegistration>(
+  "BinRegistration",
+  binRegistrationSchema,
+);

@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from "mongoose";
 
 export interface ILGA {
   name: string;
@@ -50,9 +50,7 @@ const stateSchema = new Schema<IState>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-stateSchema.index({ code: 1 });
-
-export const State = mongoose.model<IState>('State', stateSchema);
+export const State = mongoose.model<IState>("State", stateSchema);

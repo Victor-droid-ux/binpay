@@ -1,19 +1,19 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from "mongoose";
 
 export enum PaymentStatus {
-  PENDING = 'PENDING',
-  PROCESSING = 'PROCESSING',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-  REFUNDED = 'REFUNDED',
+  PENDING = "PENDING",
+  PROCESSING = "PROCESSING",
+  COMPLETED = "COMPLETED",
+  FAILED = "FAILED",
+  REFUNDED = "REFUNDED",
 }
 
 export enum PaymentMethod {
-  CARD = 'CARD',
-  BANK_TRANSFER = 'BANK_TRANSFER',
-  USSD = 'USSD',
-  MOBILE_MONEY = 'MOBILE_MONEY',
-  POS = 'POS',
+  CARD = "CARD",
+  BANK_TRANSFER = "BANK_TRANSFER",
+  USSD = "USSD",
+  MOBILE_MONEY = "MOBILE_MONEY",
+  POS = "POS",
 }
 
 export interface IPayment extends Document {
@@ -42,14 +42,22 @@ const paymentSchema = new Schema<IPayment>(
   {
     transactionRef: { type: String, required: true, unique: true },
     paystackRef: { type: String, unique: true, sparse: true },
-    billId: { type: Schema.Types.ObjectId, ref: 'Bill', required: true },
-    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    billId: { type: Schema.Types.ObjectId, ref: "Bill", required: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     stateCode: { type: String, required: true },
     amount: { type: Number, required: true },
     fee: { type: Number, default: 0 },
     totalAmount: { type: Number, required: true },
-    method: { type: String, enum: Object.values(PaymentMethod), required: true },
-    status: { type: String, enum: Object.values(PaymentStatus), default: PaymentStatus.PENDING },
+    method: {
+      type: String,
+      enum: Object.values(PaymentMethod),
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: Object.values(PaymentStatus),
+      default: PaymentStatus.PENDING,
+    },
     paidAt: { type: Date },
     failureReason: { type: String },
     customerEmail: { type: String, required: true },
@@ -60,14 +68,12 @@ const paymentSchema = new Schema<IPayment>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 paymentSchema.index({ userId: 1 });
 paymentSchema.index({ billId: 1 });
 paymentSchema.index({ stateCode: 1 });
-paymentSchema.index({ transactionRef: 1 });
-paymentSchema.index({ paystackRef: 1 });
 paymentSchema.index({ status: 1 });
 
-export const Payment = mongoose.model<IPayment>('Payment', paymentSchema);
+export const Payment = mongoose.model<IPayment>("Payment", paymentSchema);

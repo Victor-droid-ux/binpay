@@ -1,10 +1,16 @@
 // API Configuration and utilities
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+// API Configuration and utilities
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public data?: any) {
+  constructor(
+    public status: number,
+    message: string,
+    public data?: any,
+  ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
@@ -14,9 +20,9 @@ interface FetchOptions extends RequestInit {
 
 async function fetchApi(endpoint: string, options: FetchOptions = {}) {
   const { requiresAuth = false, ...fetchOptions } = options;
-  
+
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   // Merge with any additional headers
@@ -26,9 +32,9 @@ async function fetchApi(endpoint: string, options: FetchOptions = {}) {
 
   // Add auth token if required
   if (requiresAuth) {
-    const token = localStorage.getItem('accessToken');
+    const token = localStorage.getItem("accessToken");
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      headers["Authorization"] = `Bearer ${token}`;
     }
   }
 
@@ -40,7 +46,11 @@ async function fetchApi(endpoint: string, options: FetchOptions = {}) {
   const data = await response.json();
 
   if (!response.ok) {
-    throw new ApiError(response.status, data.error || 'An error occurred', data);
+    throw new ApiError(
+      response.status,
+      data.error || "An error occurred",
+      data,
+    );
   }
 
   return data;
@@ -48,23 +58,27 @@ async function fetchApi(endpoint: string, options: FetchOptions = {}) {
 
 // Auth API
 export const authApi = {
-  login: async (credentials: { email?: string; phone?: string; password: string }) => {
-    const data = await fetchApi('/auth/login', {
-      method: 'POST',
+  login: async (credentials: {
+    email?: string;
+    phone?: string;
+    password: string;
+  }) => {
+    const data = await fetchApi("/auth/login", {
+      method: "POST",
       body: JSON.stringify(credentials),
     });
-    
+
     // Store tokens and user data
     if (data.accessToken) {
-      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem("accessToken", data.accessToken);
     }
     if (data.refreshToken) {
-      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem("refreshToken", data.refreshToken);
     }
     if (data.user) {
-      localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.setItem("user", JSON.stringify(data.user));
     }
-    
+
     return data;
   },
 
@@ -78,45 +92,45 @@ export const authApi = {
     lgaId?: string;
     address?: string;
   }) => {
-    const data = await fetchApi('/auth/register', {
-      method: 'POST',
+    const data = await fetchApi("/auth/register", {
+      method: "POST",
       body: JSON.stringify(userData),
     });
-    
+
     // Store tokens and user data
     if (data.accessToken) {
-      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem("accessToken", data.accessToken);
     }
     if (data.refreshToken) {
-      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem("refreshToken", data.refreshToken);
     }
     if (data.user) {
-      localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.setItem("user", JSON.stringify(data.user));
     }
-    
+
     return data;
   },
 
   refreshToken: async () => {
-    const refreshToken = localStorage.getItem('refreshToken');
+    const refreshToken = localStorage.getItem("refreshToken");
     if (!refreshToken) {
-      throw new Error('No refresh token available');
+      throw new Error("No refresh token available");
     }
 
-    const data = await fetchApi('/auth/refresh-token', {
-      method: 'POST',
+    const data = await fetchApi("/auth/refresh-token", {
+      method: "POST",
       body: JSON.stringify({ refreshToken }),
     });
-    
+
     if (data.accessToken) {
-      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem("accessToken", data.accessToken);
     }
-    
+
     return data;
   },
 
   getCurrentUser: async () => {
-    const data = await fetchApi('/auth/me', {
+    const data = await fetchApi("/auth/me", {
       requiresAuth: true,
     });
     // Backend returns { user: {...} }, extract the user object
@@ -124,22 +138,27 @@ export const authApi = {
   },
 
   logout: () => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
   },
 };
 
 // Bills API
 export const billsApi = {
-  getAll: async (filters?: { status?: string; lgaId?: string; page?: number; limit?: number }) => {
+  getAll: async (filters?: {
+    status?: string;
+    lgaId?: string;
+    page?: number;
+    limit?: number;
+  }) => {
     const params = new URLSearchParams();
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-    
+
     return fetchApi(`/bills?${params.toString()}`, {
       requiresAuth: true,
     });
@@ -158,8 +177,8 @@ export const billsApi = {
   },
 
   create: async (billData: any) => {
-    return fetchApi('/bills', {
-      method: 'POST',
+    return fetchApi("/bills", {
+      method: "POST",
       body: JSON.stringify(billData),
       requiresAuth: true,
     });
@@ -167,7 +186,7 @@ export const billsApi = {
 
   update: async (id: string, billData: any) => {
     return fetchApi(`/bills/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(billData),
       requiresAuth: true,
     });
@@ -180,15 +199,15 @@ export const billsApi = {
     address: string;
     customerRef?: string;
   }) => {
-    return fetchApi('/bills/bins/register', {
-      method: 'POST',
+    return fetchApi("/bills/bins/register", {
+      method: "POST",
       body: JSON.stringify(data),
       requiresAuth: true,
     });
   },
 
   getUserBins: async () => {
-    return fetchApi('/bills/bins', {
+    return fetchApi("/bills/bins", {
       requiresAuth: true,
     });
   },
@@ -199,9 +218,9 @@ export const billsApi = {
     lgaName?: string;
   }) => {
     const queryParams = new URLSearchParams();
-    if (params.address) queryParams.append('address', params.address);
-    if (params.stateCode) queryParams.append('stateCode', params.stateCode);
-    if (params.lgaName) queryParams.append('lgaName', params.lgaName);
+    if (params.address) queryParams.append("address", params.address);
+    if (params.stateCode) queryParams.append("stateCode", params.stateCode);
+    if (params.lgaName) queryParams.append("lgaName", params.lgaName);
 
     return fetchApi(`/bills/bins/search?${queryParams.toString()}`, {
       requiresAuth: true,
@@ -210,8 +229,8 @@ export const billsApi = {
 
   // Link bin to user account
   linkBin: async (binId: string) => {
-    return fetchApi('/bills/bins/link', {
-      method: 'POST',
+    return fetchApi("/bills/bins/link", {
+      method: "POST",
       body: JSON.stringify({ binId }),
       requiresAuth: true,
     });
@@ -219,8 +238,8 @@ export const billsApi = {
 
   // Unlink bin from user account
   unlinkBin: async (binId: string) => {
-    return fetchApi('/bills/bins/unlink', {
-      method: 'POST',
+    return fetchApi("/bills/bins/unlink", {
+      method: "POST",
       body: JSON.stringify({ binId }),
       requiresAuth: true,
     });
@@ -228,14 +247,14 @@ export const billsApi = {
 
   // Get user dashboard statistics
   getUserStats: async () => {
-    return fetchApi('/bills/user/stats', {
+    return fetchApi("/bills/user/stats", {
       requiresAuth: true,
     });
   },
 
   // Get user notifications
   getNotifications: async () => {
-    return fetchApi('/bills/notifications', {
+    return fetchApi("/bills/notifications", {
       requiresAuth: true,
     });
   },
@@ -243,15 +262,15 @@ export const billsApi = {
   // Mark notification as read
   markNotificationRead: async (notificationId: string) => {
     return fetchApi(`/bills/notifications/${notificationId}/read`, {
-      method: 'PUT',
+      method: "PUT",
       requiresAuth: true,
     });
   },
 
   // Mark all notifications as read
   markAllNotificationsRead: async () => {
-    return fetchApi('/bills/notifications/mark-all-read', {
-      method: 'PUT',
+    return fetchApi("/bills/notifications/mark-all-read", {
+      method: "PUT",
       requiresAuth: true,
     });
   },
@@ -266,14 +285,18 @@ export const billsApi = {
 
 // Payments API
 export const paymentsApi = {
-  getAll: async (filters?: { status?: string; page?: number; limit?: number }) => {
+  getAll: async (filters?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) => {
     const params = new URLSearchParams();
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-    
+
     return fetchApi(`/payments?${params.toString()}`, {
       requiresAuth: true,
     });
@@ -285,9 +308,12 @@ export const paymentsApi = {
     });
   },
 
-  initialize: async (paymentData: { billId: string; method: 'CARD' | 'BANK_TRANSFER' | 'USSD' | 'MOBILE_MONEY' }) => {
-    return fetchApi('/payments/initialize', {
-      method: 'POST',
+  initialize: async (paymentData: {
+    billId: string;
+    method: "CARD" | "BANK_TRANSFER" | "USSD" | "MOBILE_MONEY";
+  }) => {
+    return fetchApi("/payments/initialize", {
+      method: "POST",
       body: JSON.stringify(paymentData),
       requiresAuth: true,
     });
@@ -302,46 +328,76 @@ export const paymentsApi = {
 
 // Admin API
 export const adminApi = {
+  // Get notifications for the logged-in state admin
+  getNotifications: async () => {
+    return fetchApi("/admin/notifications", {
+      requiresAuth: true,
+    });
+  },
+  // Notify state admin that user's bin is full
+  notifyBinFull: async () => {
+    return fetchApi("/admin/notify-bin-full", {
+      method: "POST",
+      requiresAuth: true,
+    });
+  },
+
+  // Send bulk overdue notifications to users
+  sendBulkOverdueNotifications: async (stateCode: string) => {
+    return fetchApi(`/admin/notifications/overdue/${stateCode}`, {
+      method: "POST",
+      requiresAuth: true,
+    });
+  },
   getStateStats: async (stateCode: string) => {
     return fetchApi(`/admin/stats/${stateCode}`, {
       requiresAuth: true,
     });
   },
 
-  getStateBills: async (stateCode: string, filters?: { status?: string; page?: number; limit?: number }) => {
+  getStateBills: async (
+    stateCode: string,
+    filters?: { status?: string; page?: number; limit?: number },
+  ) => {
     const params = new URLSearchParams();
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-    
+
     return fetchApi(`/admin/bills/${stateCode}?${params.toString()}`, {
       requiresAuth: true,
     });
   },
 
-  getStatePayments: async (stateCode: string, filters?: { status?: string; page?: number; limit?: number }) => {
+  getStatePayments: async (
+    stateCode: string,
+    filters?: { status?: string; page?: number; limit?: number },
+  ) => {
     const params = new URLSearchParams();
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-    
+
     return fetchApi(`/admin/payments/${stateCode}?${params.toString()}`, {
       requiresAuth: true,
     });
   },
 
-  getStateUsers: async (stateCode: string, filters?: { page?: number; limit?: number; search?: string }) => {
+  getStateUsers: async (
+    stateCode: string,
+    filters?: { page?: number; limit?: number; search?: string },
+  ) => {
     const params = new URLSearchParams();
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-    
+
     return fetchApi(`/admin/users/${stateCode}?${params.toString()}`, {
       requiresAuth: true,
     });
@@ -354,7 +410,7 @@ export const adminApi = {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-    
+
     return fetchApi(`/admin/users?${params.toString()}`, {
       requiresAuth: true,
     });
@@ -362,7 +418,7 @@ export const adminApi = {
 
   updateUserStatus: async (userId: string, isActive: boolean) => {
     return fetchApi(`/admin/users/${userId}/status`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify({ isActive }),
       requiresAuth: true,
     });
@@ -374,23 +430,23 @@ export const adminApi = {
     address: string;
     customerRef?: string;
   }) => {
-    return fetchApi('/admin/addresses/register', {
-      method: 'POST',
+    return fetchApi("/admin/addresses/register", {
+      method: "POST",
       body: JSON.stringify(data),
       requiresAuth: true,
     });
   },
 
   getAddresses: async () => {
-    return fetchApi('/admin/addresses', {
+    return fetchApi("/admin/addresses", {
       requiresAuth: true,
     });
   },
 
   // Update monthly bill amount for state
   updateMonthlyBillAmount: async (amount: number) => {
-    return fetchApi('/admin/billing/monthly-amount', {
-      method: 'PUT',
+    return fetchApi("/admin/billing/monthly-amount", {
+      method: "PUT",
       body: JSON.stringify({ amount }),
       requiresAuth: true,
     });
@@ -398,8 +454,8 @@ export const adminApi = {
 
   // Generate monthly bills for all active bins in state
   generateMonthlyBills: async () => {
-    return fetchApi('/admin/bills/generate', {
-      method: 'POST',
+    return fetchApi("/admin/bills/generate", {
+      method: "POST",
       requiresAuth: true,
     });
   },
@@ -407,18 +463,21 @@ export const adminApi = {
   // Generate bill for specific bin
   generateBillForBin: async (binId: string) => {
     return fetchApi(`/admin/bills/generate/${binId}`, {
-      method: 'POST',
+      method: "POST",
       requiresAuth: true,
     });
   },
 
-  updateAddress: async (addressId: string, data: {
-    address?: string;
-    lgaName?: string;
-    customerRef?: string;
-  }) => {
+  updateAddress: async (
+    addressId: string,
+    data: {
+      address?: string;
+      lgaName?: string;
+      customerRef?: string;
+    },
+  ) => {
     return fetchApi(`/admin/addresses/${addressId}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data),
       requiresAuth: true,
     });
@@ -426,7 +485,7 @@ export const adminApi = {
 
   toggleAddressStatus: async (addressId: string) => {
     return fetchApi(`/admin/addresses/${addressId}/toggle-status`, {
-      method: 'PATCH',
+      method: "PATCH",
       requiresAuth: true,
     });
   },
@@ -435,19 +494,19 @@ export const adminApi = {
 // Super Admin API
 export const superAdminApi = {
   getStats: async () => {
-    return fetchApi('/admin/super/stats', {
+    return fetchApi("/admin/super/stats", {
       requiresAuth: true,
     });
   },
 
   getStateRevenues: async () => {
-    return fetchApi('/admin/super/state-revenues', {
+    return fetchApi("/admin/super/state-revenues", {
       requiresAuth: true,
     });
   },
 
   getAllStateAdmins: async () => {
-    return fetchApi('/admin/super/state-admins', {
+    return fetchApi("/admin/super/state-admins", {
       requiresAuth: true,
     });
   },
@@ -468,8 +527,8 @@ export const superAdminApi = {
       canUpdate: boolean;
     }>;
   }) => {
-    return fetchApi('/admin/super/state-admins', {
-      method: 'POST',
+    return fetchApi("/admin/super/state-admins", {
+      method: "POST",
       body: JSON.stringify(data),
       requiresAuth: true,
     });
@@ -477,19 +536,22 @@ export const superAdminApi = {
 
   toggleStateAdminStatus: async (adminId: string) => {
     return fetchApi(`/admin/super/state-admins/${adminId}/toggle-status`, {
-      method: 'PATCH',
+      method: "PATCH",
       requiresAuth: true,
     });
   },
 
-  updateStateAdmin: async (adminId: string, data: {
-    email?: string;
-    phone?: string;
-    firstName?: string;
-    lastName?: string;
-  }) => {
+  updateStateAdmin: async (
+    adminId: string,
+    data: {
+      email?: string;
+      phone?: string;
+      firstName?: string;
+      lastName?: string;
+    },
+  ) => {
     return fetchApi(`/admin/super/state-admins/${adminId}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data),
       requiresAuth: true,
     });
@@ -497,7 +559,7 @@ export const superAdminApi = {
 
   deleteStateAdmin: async (adminId: string) => {
     return fetchApi(`/admin/super/state-admins/${adminId}`, {
-      method: 'DELETE',
+      method: "DELETE",
       requiresAuth: true,
     });
   },
@@ -505,9 +567,9 @@ export const superAdminApi = {
   getAllStates: async (filters?: { isActive?: boolean }) => {
     const params = new URLSearchParams();
     if (filters?.isActive !== undefined) {
-      params.append('isActive', filters.isActive.toString());
+      params.append("isActive", filters.isActive.toString());
     }
-    
+
     return fetchApi(`/admin/states?${params.toString()}`, {
       requiresAuth: true,
     });

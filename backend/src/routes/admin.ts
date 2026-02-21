@@ -1,27 +1,257 @@
-import { Router } from 'express';
-import { body, param, query } from 'express-validator';
-import { User, State, Bill, Payment, BinRegistration } from '../models';
-import { UserRole } from '../models/User';
-import bcrypt from 'bcryptjs';
-import { authenticate, AuthRequest, authorize, authorizeStateAdmin } from '../middleware/auth';
-import { validate } from '../middleware/validator';
-import { generateBinId } from '../utils/binId';
-import { 
-  generateMonthlyBillsForState, 
+import { Router, Response } from "express";
+import { body, param } from "express-validator";
+import {
+  Bill,
+  Payment,
+  BinRegistration,
+  State,
+  Notification,
+  User,
+} from "../models";
+import {
+  authenticate,
+  AuthRequest,
+  authorize,
+  authorizeStateAdmin,
+} from "../middleware/auth";
+import { validate } from "../middleware/validator";
+import { generateBinId } from "../utils/binId";
+import {
   generateBillForBin,
-  updateOverdueBills 
-} from '../utils/billGenerator';
+  generateMonthlyBillsForState,
+} from "../utils/billGenerator";
+import bcrypt from "bcryptjs";
+import { sendEmail } from "../services/email";
+import { sendSMS } from "../services/sms";
 
 const router = Router();
 
+// Send bulk overdue notifications to users in a state
+router.post(
+  "/notifications/overdue/:stateCode",
+  authenticate,
+  authorizeStateAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { stateCode } = req.params;
+      const state = await State.findOne({ code: stateCode });
+      if (!state) {
+        return res.status(404).json({ error: "State not found" });
+      }
+
+      const overdueBills = await Bill.find({ stateCode, status: "OVERDUE" });
+      if (!overdueBills.length) {
+        return res.json({ message: "No overdue bills found", sent: 0 });
+      }
+
+      const userIds = [
+        ...new Set(
+          overdueBills.map((b) => b.userId?.toString()).filter(Boolean),
+        ),
+      ];
+
+      if (!userIds.length) {
+        return res.json({
+          message: "No users with overdue bills found",
+          sent: 0,
+        });
+      }
+
+      // Fetch all users with overdue bills
+      const users = await User.find({ _id: { $in: userIds } });
+
+      // Fetch all overdue bills with bin registration populated
+      const overdueBillsPopulated = await Bill.find({
+        stateCode,
+        status: "OVERDUE",
+      }).populate("binRegistrationId");
+
+      await Promise.all(
+        overdueBillsPopulated.map(async (bill) => {
+          const user = users.find(
+            (u) => u._id.toString() === bill.userId.toString(),
+          );
+          if (!user) return;
+          const bin = bill.binRegistrationId;
+          let addressInfo = "(address not found)";
+          // Type guard: check if bin is an object and has address fields
+          if (
+            bin &&
+            typeof bin === "object" &&
+            "address" in bin &&
+            "lgaName" in bin &&
+            "stateCode" in bin
+          ) {
+            addressInfo = `${(bin as any).address}, ${(bin as any).lgaName}, ${(bin as any).stateCode}`;
+          }
+          const message = `Your bill (${bill.billNumber}) for address: ${addressInfo} is overdue. Please pay as soon as possible to avoid penalties.`;
+
+          // Create notification
+          await Notification.create({
+            userId: user._id,
+            title: "Overdue Bill Alert",
+            message,
+            type: "OVERDUE_BILL",
+            isRead: false,
+            metadata: { stateCode, billId: bill._id, address: addressInfo },
+          });
+
+          // Send overdue email if user has email
+          if (user.email) {
+            const subject = "Overdue Waste Bill Payment Reminder";
+            const html = `<p>Dear ${user.firstName},</p>
+              <p>This is a reminder that your waste bill <b>(${bill.billNumber})</b> for <b>${addressInfo}</b> is overdue. Please pay as soon as possible to avoid penalties or service disruption.</p>
+              <p>If you have already paid, please ignore this message.</p>
+              <p>Thank you,<br/>Bin-Pay Team</p>`;
+            const text = `Dear ${user.firstName},\n\nThis is a reminder that your waste bill (${bill.billNumber}) for ${addressInfo} is overdue. Please pay as soon as possible to avoid penalties or service disruption.\n\nIf you have already paid, please ignore this message.\n\nThank you,\nBin-Pay Team`;
+            await sendEmail({
+              to: user.email,
+              subject,
+              html,
+              text,
+            });
+          }
+        }),
+      );
+
+      res.json({
+        message: `Notifications and emails sent to ${users.length} users`,
+        sent: users.length,
+      });
+    } catch (error) {
+      console.error("Send bulk overdue notifications error:", error);
+      res.status(500).json({ error: "Failed to send overdue notifications" });
+    }
+  },
+);
+
+// Get notifications for logged-in state admin
+router.get(
+  "/notifications",
+  authenticate,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const user = await User.findById(userId);
+      if (!user || user.role !== "STATE_ADMIN") {
+        return res
+          .status(403)
+          .json({ error: "Only state admins can view these notifications" });
+      }
+
+      const notifications = await Notification.find({ userId })
+        .sort({ createdAt: -1 })
+        .limit(100);
+
+      res.json({ notifications });
+    } catch (error) {
+      console.error("Fetch state admin notifications error:", error);
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  },
+);
+
+// Notify state admin that user's bin is full
+router.post(
+  "/notify-bin-full",
+  authenticate,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const user = await User.findById(userId);
+      if (!user || !user.stateCode) {
+        return res.status(400).json({ error: "User or state not found" });
+      }
+
+      // Find the user's registered address (most recent active BinRegistration)
+      const binRegistration = await BinRegistration.findOne({
+        userId: user._id,
+        stateCode: user.stateCode,
+        isActive: true,
+      }).sort({ createdAt: -1 });
+
+      if (!binRegistration) {
+        return res
+          .status(400)
+          .json({ error: "Please link your bin before notifying your admin" });
+      }
+      const addressInfo = `${binRegistration.address}, ${binRegistration.lgaName}, ${binRegistration.stateCode}`;
+
+      const stateAdmins = await User.find({
+        role: "STATE_ADMIN",
+        stateCode: user.stateCode,
+        isActive: true,
+      });
+
+      if (!stateAdmins.length) {
+        return res
+          .status(404)
+          .json({ error: "No state admin found for your state" });
+      }
+
+      const notificationMessage = `User ${user.firstName} ${user.lastName} (${user.email}) from address: ${addressInfo} reports their bin is full and requests waste pickup.`;
+
+      // Create notifications, send email and SMS to each admin
+      await Promise.all(
+        stateAdmins.map(async (admin) => {
+          await Notification.create({
+            userId: admin._id,
+            title: "Bin Full Alert",
+            message: notificationMessage,
+            type: "BIN_FULL",
+            isRead: false,
+            metadata: {
+              reportedBy: user._id,
+              reportedByName: `${user.firstName} ${user.lastName}`,
+              reportedByEmail: user.email,
+              address: addressInfo,
+            },
+          });
+
+          // Send email
+          if (admin.email) {
+            await sendEmail({
+              to: admin.email,
+              subject: "Bin Full Alert - Waste Pickup Request",
+              html: `<p>${notificationMessage}</p>`,
+              text: notificationMessage,
+            });
+          }
+
+          // Send SMS
+          if (admin.phone) {
+            await sendSMS({
+              to: admin.phone,
+              message: notificationMessage,
+            });
+          }
+        }),
+      );
+
+      res.json({ message: "State admin has been notified." });
+    } catch (error) {
+      console.error("Notify bin full error:", error);
+      res.status(500).json({ error: "Failed to notify state admin" });
+    }
+  },
+);
+
 // Get all states
-router.get('/states', async (req, res) => {
+router.get("/states", async (req, res: Response) => {
   try {
     const { isActive } = req.query;
 
     const where: any = {};
     if (isActive !== undefined) {
-      where.isActive = isActive === 'true';
+      where.isActive = isActive === "true";
     }
 
     const states = await State.find(where).sort({ name: 1 });
@@ -43,25 +273,25 @@ router.get('/states', async (req, res) => {
             zones: state.zones.length,
           },
         };
-      })
+      }),
     );
 
     res.json({ states: statesWithCounts });
   } catch (error) {
-    console.error('Get states error:', error);
-    res.status(500).json({ error: 'Failed to get states' });
+    console.error("Get states error:", error);
+    res.status(500).json({ error: "Failed to get states" });
   }
 });
 
 // Get state details with LGAs and zones
-router.get('/states/:stateCode', async (req, res) => {
+router.get("/states/:stateCode", async (req, res: Response) => {
   try {
     const { stateCode } = req.params;
 
     const state = await State.findOne({ code: stateCode });
 
     if (!state) {
-      return res.status(404).json({ error: 'State not found' });
+      return res.status(404).json({ error: "State not found" });
     }
 
     const [billCount, paymentCount] = await Promise.all([
@@ -79,14 +309,14 @@ router.get('/states/:stateCode', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Get state error:', error);
-    res.status(500).json({ error: 'Failed to get state' });
+    console.error("Get state error:", error);
+    res.status(500).json({ error: "Failed to get state" });
   }
 });
 
 // Get dashboard stats for state admin
 router.get(
-  '/stats/:stateCode',
+  "/stats/:stateCode",
   authenticate,
   authorizeStateAdmin,
   async (req: AuthRequest, res) => {
@@ -96,11 +326,15 @@ router.get(
       const state = await State.findOne({ code: stateCode });
 
       if (!state) {
-        return res.status(404).json({ error: 'State not found' });
+        return res.status(404).json({ error: "State not found" });
       }
 
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const firstDayOfMonth = new Date(
+        new Date().getFullYear(),
+        new Date().getMonth(),
+        1,
+      );
 
       const [
         totalBills,
@@ -111,31 +345,44 @@ router.get(
         activeUsers,
       ] = await Promise.all([
         Bill.countDocuments({ stateCode: state.code }),
-        Bill.countDocuments({ stateCode: state.code, status: 'PAID' }),
-        Bill.countDocuments({ stateCode: state.code, status: 'PENDING' }),
-        Bill.countDocuments({ stateCode: state.code, status: 'OVERDUE' }),
-        BinRegistration.distinct('userId', { stateCode: state.code }).then(ids => ids.length),
+        Bill.countDocuments({ stateCode: state.code, status: "PAID" }),
+        Bill.countDocuments({ stateCode: state.code, status: "PENDING" }),
+        Bill.countDocuments({ stateCode: state.code, status: "OVERDUE" }),
+        BinRegistration.distinct("userId", { stateCode: state.code }).then(
+          (ids) => ids.length,
+        ),
         User.countDocuments({
-          _id: { $in: await BinRegistration.distinct('userId', { stateCode: state.code }) },
+          _id: {
+            $in: await BinRegistration.distinct("userId", {
+              stateCode: state.code,
+            }),
+          },
           lastLogin: { $gte: thirtyDaysAgo },
         }),
       ]);
 
       // Get revenue totals
-      const completedPayments = await Payment.find({ 
-        stateCode: state.code, 
-        status: 'SUCCESS' 
+      const completedPayments = await Payment.find({
+        stateCode: state.code,
+        status: "SUCCESS",
       });
-      const totalRevenue = completedPayments.reduce((sum, p) => sum + p.amount, 0);
+      const totalRevenue = completedPayments.reduce(
+        (sum, p) => sum + p.amount,
+        0,
+      );
 
       const monthlyPayments = await Payment.find({
         stateCode: state.code,
-        status: 'SUCCESS',
+        status: "SUCCESS",
         paidAt: { $gte: firstDayOfMonth },
       });
-      const monthlyRevenue = monthlyPayments.reduce((sum, p) => sum + p.amount, 0);
+      const monthlyRevenue = monthlyPayments.reduce(
+        (sum, p) => sum + p.amount,
+        0,
+      );
 
-      const collectionRate = totalBills > 0 ? ((paidBills / totalBills) * 100).toFixed(2) : 0;
+      const collectionRate =
+        totalBills > 0 ? ((paidBills / totalBills) * 100).toFixed(2) : 0;
 
       res.json({
         stats: {
@@ -151,20 +398,18 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('Get stats error:', error);
-      res.status(500).json({ error: 'Failed to get statistics' });
+      console.error("Get stats error:", error);
+      res.status(500).json({ error: "Failed to get statistics" });
     }
-  }
+  },
 );
 
 // Update monthly bill amount for a state (STATE_ADMIN only)
 router.put(
-  '/billing/monthly-amount',
+  "/billing/monthly-amount",
   authenticate,
   authorizeStateAdmin,
-  validate([
-    body('amount').isNumeric().isFloat({ min: 0 }),
-  ]),
+  validate([body("amount").isNumeric().isFloat({ min: 0 })]),
   async (req: AuthRequest, res) => {
     try {
       const stateCode = req.user!.stateCode;
@@ -173,7 +418,7 @@ router.put(
       const state = await State.findOne({ code: stateCode });
 
       if (!state) {
-        return res.status(404).json({ error: 'State not found' });
+        return res.status(404).json({ error: "State not found" });
       }
 
       // Update the monthly bill amount
@@ -181,7 +426,7 @@ router.put(
       await state.save();
 
       res.json({
-        message: 'Monthly bill amount updated successfully',
+        message: "Monthly bill amount updated successfully",
         state: {
           code: state.code,
           name: state.name,
@@ -189,26 +434,26 @@ router.put(
         },
       });
     } catch (error) {
-      console.error('Update bill amount error:', error);
-      res.status(500).json({ error: 'Failed to update bill amount' });
+      console.error("Update bill amount error:", error);
+      res.status(500).json({ error: "Failed to update bill amount" });
     }
-  }
+  },
 );
 
 // Get all bills for state admin
 router.get(
-  '/bills/:stateCode',
+  "/bills/:stateCode",
   authenticate,
   authorizeStateAdmin,
   async (req: AuthRequest, res) => {
     try {
       const { stateCode } = req.params;
-      const { status, page = '1', limit = '20', search } = req.query;
+      const { status, page = "1", limit = "20", search } = req.query;
 
       const state = await State.findOne({ code: stateCode });
 
       if (!state) {
-        return res.status(404).json({ error: 'State not found' });
+        return res.status(404).json({ error: "State not found" });
       }
 
       const pageNum = parseInt(page as string);
@@ -220,15 +465,13 @@ router.get(
         where.status = status;
       }
       if (search) {
-        where.$or = [
-          { billNumber: new RegExp(search as string, 'i') },
-        ];
+        where.$or = [{ billNumber: new RegExp(search as string, "i") }];
       }
 
       const [bills, total] = await Promise.all([
         Bill.find(where)
-          .populate('binRegistrationId')
-          .populate('userId', 'firstName lastName email phone')
+          .populate("binRegistrationId")
+          .populate("userId", "firstName lastName email phone")
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limitNum),
@@ -245,26 +488,26 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('Get bills error:', error);
-      res.status(500).json({ error: 'Failed to get bills' });
+      console.error("Get bills error:", error);
+      res.status(500).json({ error: "Failed to get bills" });
     }
-  }
+  },
 );
 
 // Get all payments for state admin
 router.get(
-  '/payments/:stateCode',
+  "/payments/:stateCode",
   authenticate,
   authorizeStateAdmin,
   async (req: AuthRequest, res) => {
     try {
       const { stateCode } = req.params;
-      const { status, page = '1', limit = '20' } = req.query;
+      const { status, page = "1", limit = "20" } = req.query;
 
       const state = await State.findOne({ code: stateCode });
 
       if (!state) {
-        return res.status(404).json({ error: 'State not found' });
+        return res.status(404).json({ error: "State not found" });
       }
 
       const pageNum = parseInt(page as string);
@@ -279,10 +522,10 @@ router.get(
       const [payments, total] = await Promise.all([
         Payment.find(where)
           .populate({
-            path: 'billId',
-            populate: { path: 'binRegistrationId' },
+            path: "billId",
+            populate: { path: "binRegistrationId" },
           })
-          .populate('userId', 'firstName lastName email phone')
+          .populate("userId", "firstName lastName email phone")
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limitNum),
@@ -299,21 +542,21 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('Get payments error:', error);
-      res.status(500).json({ error: 'Failed to get payments' });
+      console.error("Get payments error:", error);
+      res.status(500).json({ error: "Failed to get payments" });
     }
-  }
+  },
 );
 
 // Get all users for state admin
 router.get(
-  '/users/:stateCode',
+  "/users/:stateCode",
   authenticate,
   authorizeStateAdmin,
   async (req: AuthRequest, res) => {
     try {
       const { stateCode } = req.params;
-      const { page = '1', limit = '20', search } = req.query;
+      const { page = "1", limit = "20", search } = req.query;
 
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
@@ -322,26 +565,30 @@ router.get(
       const state = await State.findOne({ code: stateCode });
 
       if (!state) {
-        return res.status(404).json({ error: 'State not found' });
+        return res.status(404).json({ error: "State not found" });
       }
 
       // Get user IDs who have bins in this state
-      const userIds = await BinRegistration.distinct('userId', { stateCode: state.code });
+      const userIds = await BinRegistration.distinct("userId", {
+        stateCode: state.code,
+      });
 
-      const where: any = { _id: { $in: userIds }, role: 'USER' };
+      const where: any = { _id: { $in: userIds }, role: "USER" };
 
       if (search) {
         where.$or = [
-          { email: new RegExp(search as string, 'i') },
-          { firstName: new RegExp(search as string, 'i') },
-          { lastName: new RegExp(search as string, 'i') },
-          { phone: new RegExp(search as string, 'i') },
+          { email: new RegExp(search as string, "i") },
+          { firstName: new RegExp(search as string, "i") },
+          { lastName: new RegExp(search as string, "i") },
+          { phone: new RegExp(search as string, "i") },
         ];
       }
 
       const [users, total] = await Promise.all([
         User.find(where)
-          .select('email phone firstName lastName isActive isVerified lastLogin createdAt')
+          .select(
+            "email phone firstName lastName isActive isVerified lastLogin createdAt",
+          )
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limitNum),
@@ -365,7 +612,7 @@ router.get(
               binRegistrations: binCount,
             },
           };
-        })
+        }),
       );
 
       res.json({
@@ -378,23 +625,25 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('Get users error:', error);
-      res.status(500).json({ error: 'Failed to get users' });
+      console.error("Get users error:", error);
+      res.status(500).json({ error: "Failed to get users" });
     }
-  }
+  },
 );
 
 // SUPER ADMIN ROUTES
 
 // Get all state admins (SUPER_ADMIN only)
 router.get(
-  '/super/state-admins',
+  "/super/state-admins",
   authenticate,
-  authorize('SUPER_ADMIN'),
+  authorize("SUPER_ADMIN"),
   async (req: AuthRequest, res) => {
     try {
-      const stateAdmins = await User.find({ role: 'STATE_ADMIN' })
-        .select('email phone firstName lastName stateCode permissions isActive lastLogin createdAt')
+      const stateAdmins = await User.find({ role: "STATE_ADMIN" })
+        .select(
+          "email phone firstName lastName stateCode permissions isActive lastLogin createdAt",
+        )
         .sort({ createdAt: -1 });
 
       // Populate state information
@@ -411,40 +660,48 @@ router.get(
                 }
               : null,
           };
-        })
+        }),
       );
 
       res.json({ stateAdmins: stateAdminsWithStates });
     } catch (error) {
-      console.error('Get state admins error:', error);
-      res.status(500).json({ error: 'Failed to get state admins' });
+      console.error("Get state admins error:", error);
+      res.status(500).json({ error: "Failed to get state admins" });
     }
-  }
+  },
 );
 
 // Create state admin (SUPER_ADMIN only)
 router.post(
-  '/super/state-admins',
+  "/super/state-admins",
   authenticate,
-  authorize('SUPER_ADMIN'),
+  authorize("SUPER_ADMIN"),
   validate([
-    body('email').isEmail().normalizeEmail(),
-    body('phone').matches(/^\+?[1-9]\d{1,14}$/),
-    body('password').isLength({ min: 8 }),
-    body('firstName').notEmpty().trim(),
-    body('lastName').notEmpty().trim(),
-    body('stateCode').notEmpty(),
-    body('permissions').optional().isArray(),
+    body("email").isEmail().normalizeEmail(),
+    body("phone").matches(/^\+?[1-9]\d{1,14}$/),
+    body("password").isLength({ min: 8 }),
+    body("firstName").notEmpty().trim(),
+    body("lastName").notEmpty().trim(),
+    body("stateCode").notEmpty(),
+    body("permissions").optional().isArray(),
   ]),
   async (req: AuthRequest, res) => {
     try {
-      const { email, phone, password, firstName, lastName, stateCode, permissions } = req.body;
+      const {
+        email,
+        phone,
+        password,
+        firstName,
+        lastName,
+        stateCode,
+        permissions,
+      } = req.body;
 
       // Check if state exists
       const state = await State.findOne({ code: stateCode });
 
       if (!state) {
-        return res.status(404).json({ error: 'State not found' });
+        return res.status(404).json({ error: "State not found" });
       }
 
       // Check if user exists
@@ -453,7 +710,9 @@ router.post(
       });
 
       if (existingUser) {
-        return res.status(400).json({ error: 'Email or phone already registered' });
+        return res
+          .status(400)
+          .json({ error: "Email or phone already registered" });
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -464,7 +723,7 @@ router.post(
         password: hashedPassword,
         firstName,
         lastName,
-        role: 'STATE_ADMIN',
+        role: "STATE_ADMIN",
         stateCode,
         permissions: permissions || [],
         isActive: true,
@@ -472,7 +731,7 @@ router.post(
       });
 
       res.status(201).json({
-        message: 'State admin created successfully',
+        message: "State admin created successfully",
         stateAdmin: {
           id: stateAdmin._id.toString(),
           email: stateAdmin.email,
@@ -486,36 +745,36 @@ router.post(
         },
       });
     } catch (error) {
-      console.error('Create state admin error:', error);
-      res.status(500).json({ error: 'Failed to create state admin' });
+      console.error("Create state admin error:", error);
+      res.status(500).json({ error: "Failed to create state admin" });
     }
-  }
+  },
 );
 
 // Toggle state admin status (SUPER_ADMIN only)
 router.patch(
-  '/super/state-admins/:adminId/toggle-status',
+  "/super/state-admins/:adminId/toggle-status",
   authenticate,
-  authorize('SUPER_ADMIN'),
-  validate([param('adminId').notEmpty()]),
+  authorize("SUPER_ADMIN"),
+  validate([param("adminId").notEmpty()]),
   async (req: AuthRequest, res) => {
     try {
       const { adminId } = req.params;
 
       const admin = await User.findOne({
         _id: adminId,
-        role: 'STATE_ADMIN',
+        role: "STATE_ADMIN",
       });
 
       if (!admin) {
-        return res.status(404).json({ error: 'State admin not found' });
+        return res.status(404).json({ error: "State admin not found" });
       }
 
       admin.isActive = !admin.isActive;
       await admin.save();
 
       res.json({
-        message: `State admin ${admin.isActive ? 'activated' : 'deactivated'} successfully`,
+        message: `State admin ${admin.isActive ? "activated" : "deactivated"} successfully`,
         stateAdmin: {
           id: admin._id.toString(),
           email: admin.email,
@@ -523,23 +782,23 @@ router.patch(
         },
       });
     } catch (error) {
-      console.error('Toggle admin status error:', error);
-      res.status(500).json({ error: 'Failed to toggle admin status' });
+      console.error("Toggle admin status error:", error);
+      res.status(500).json({ error: "Failed to toggle admin status" });
     }
-  }
+  },
 );
 
 // Update state admin details (SUPER_ADMIN only)
 router.put(
-  '/super/state-admins/:adminId',
+  "/super/state-admins/:adminId",
   authenticate,
-  authorize('SUPER_ADMIN'),
+  authorize("SUPER_ADMIN"),
   validate([
-    param('adminId').notEmpty(),
-    body('email').optional().isEmail(),
-    body('phone').optional().isMobilePhone('any'),
-    body('firstName').optional().trim().notEmpty(),
-    body('lastName').optional().trim().notEmpty(),
+    param("adminId").notEmpty(),
+    body("email").optional().isEmail(),
+    body("phone").optional().isMobilePhone("any"),
+    body("firstName").optional().trim().notEmpty(),
+    body("lastName").optional().trim().notEmpty(),
   ]),
   async (req: AuthRequest, res) => {
     try {
@@ -548,18 +807,21 @@ router.put(
 
       const admin = await User.findOne({
         _id: adminId,
-        role: 'STATE_ADMIN',
+        role: "STATE_ADMIN",
       });
 
       if (!admin) {
-        return res.status(404).json({ error: 'State admin not found' });
+        return res.status(404).json({ error: "State admin not found" });
       }
 
       // Check if email already exists for another user
       if (email && email !== admin.email) {
-        const existingUser = await User.findOne({ email, _id: { $ne: adminId } });
+        const existingUser = await User.findOne({
+          email,
+          _id: { $ne: adminId },
+        });
         if (existingUser) {
-          return res.status(400).json({ error: 'Email already in use' });
+          return res.status(400).json({ error: "Email already in use" });
         }
       }
 
@@ -572,7 +834,7 @@ router.put(
       await admin.save();
 
       res.json({
-        message: 'State admin updated successfully',
+        message: "State admin updated successfully",
         stateAdmin: {
           id: admin._id.toString(),
           email: admin.email,
@@ -584,29 +846,29 @@ router.put(
         },
       });
     } catch (error) {
-      console.error('Update admin error:', error);
-      res.status(500).json({ error: 'Failed to update state admin' });
+      console.error("Update admin error:", error);
+      res.status(500).json({ error: "Failed to update state admin" });
     }
-  }
+  },
 );
 
 // Delete state admin (SUPER_ADMIN only)
 router.delete(
-  '/super/state-admins/:adminId',
+  "/super/state-admins/:adminId",
   authenticate,
-  authorize('SUPER_ADMIN'),
-  validate([param('adminId').notEmpty()]),
+  authorize("SUPER_ADMIN"),
+  validate([param("adminId").notEmpty()]),
   async (req: AuthRequest, res) => {
     try {
       const { adminId } = req.params;
 
       const admin = await User.findOne({
         _id: adminId,
-        role: 'STATE_ADMIN',
+        role: "STATE_ADMIN",
       });
 
       if (!admin) {
-        return res.status(404).json({ error: 'State admin not found' });
+        return res.status(404).json({ error: "State admin not found" });
       }
 
       // Instead of hard delete, we can soft delete by deactivating
@@ -614,26 +876,37 @@ router.delete(
       await User.deleteOne({ _id: adminId });
 
       res.json({
-        message: 'State admin deleted successfully',
+        message: "State admin deleted successfully",
       });
     } catch (error) {
-      console.error('Delete admin error:', error);
-      res.status(500).json({ error: 'Failed to delete state admin' });
+      console.error("Delete admin error:", error);
+      res.status(500).json({ error: "Failed to delete state admin" });
     }
-  }
+  },
 );
 
 // Get platform-wide statistics (SUPER_ADMIN only)
 router.get(
-  '/super/stats',
+  "/super/stats",
   authenticate,
-  authorize('SUPER_ADMIN'),
+  authorize("SUPER_ADMIN"),
   async (req: AuthRequest, res) => {
     try {
       const now = new Date();
       const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      const firstDayOfLastMonth = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        1,
+      );
+      const lastDayOfLastMonth = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        0,
+        23,
+        59,
+        59,
+      );
 
       const [
         totalStates,
@@ -646,35 +919,50 @@ router.get(
       ] = await Promise.all([
         State.countDocuments(),
         State.countDocuments({ isActive: true }),
-        User.countDocuments({ role: 'USER' }),
-        User.countDocuments({ role: 'STATE_ADMIN' }),
+        User.countDocuments({ role: "USER" }),
+        User.countDocuments({ role: "STATE_ADMIN" }),
         Bill.countDocuments(),
-        Bill.countDocuments({ status: 'PAID' }),
-        Payment.countDocuments({ status: 'SUCCESS' }),
+        Bill.countDocuments({ status: "PAID" }),
+        Payment.countDocuments({ status: "SUCCESS" }),
       ]);
 
       // Get revenue totals
-      const completedPayments = await Payment.find({ status: 'SUCCESS' });
-      const totalRevenue = completedPayments.reduce((sum, p) => sum + p.amount, 0);
+      const completedPayments = await Payment.find({ status: "SUCCESS" });
+      const totalRevenue = completedPayments.reduce(
+        (sum, p) => sum + p.amount,
+        0,
+      );
 
       // This month's revenue
       const monthlyPayments = await Payment.find({
-        status: 'SUCCESS',
+        status: "SUCCESS",
         paidAt: { $gte: firstDayOfMonth },
       });
-      const monthlyRevenue = monthlyPayments.reduce((sum, p) => sum + p.amount, 0);
+      const monthlyRevenue = monthlyPayments.reduce(
+        (sum, p) => sum + p.amount,
+        0,
+      );
 
       // Last month's revenue
       const lastMonthPayments = await Payment.find({
-        status: 'SUCCESS',
+        status: "SUCCESS",
         paidAt: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth },
       });
-      const lastMonthRevenue = lastMonthPayments.reduce((sum, p) => sum + p.amount, 0);
+      const lastMonthRevenue = lastMonthPayments.reduce(
+        (sum, p) => sum + p.amount,
+        0,
+      );
 
       // Calculate month-over-month growth percentage
-      const revenueGrowth = lastMonthRevenue > 0 
-        ? parseFloat((((monthlyRevenue - lastMonthRevenue) / lastMonthRevenue) * 100).toFixed(1))
-        : 0;
+      const revenueGrowth =
+        lastMonthRevenue > 0
+          ? parseFloat(
+              (
+                ((monthlyRevenue - lastMonthRevenue) / lastMonthRevenue) *
+                100
+              ).toFixed(1),
+            )
+          : 0;
 
       res.json({
         stats: {
@@ -693,20 +981,24 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('Get platform stats error:', error);
-      res.status(500).json({ error: 'Failed to get platform statistics' });
+      console.error("Get platform stats error:", error);
+      res.status(500).json({ error: "Failed to get platform statistics" });
     }
-  }
+  },
 );
 
 // Get revenue data for all states (SUPER_ADMIN only)
 router.get(
-  '/super/state-revenues',
+  "/super/state-revenues",
   authenticate,
-  authorize('SUPER_ADMIN'),
+  authorize("SUPER_ADMIN"),
   async (req: AuthRequest, res) => {
     try {
-      const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const firstDayOfMonth = new Date(
+        new Date().getFullYear(),
+        new Date().getMonth(),
+        1,
+      );
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
       // Get all active states
@@ -724,31 +1016,44 @@ router.get(
             activeUsers,
           ] = await Promise.all([
             Bill.countDocuments({ stateCode: state.code }),
-            Bill.countDocuments({ stateCode: state.code, status: 'PAID' }),
-            Bill.countDocuments({ stateCode: state.code, status: 'PENDING' }),
-            Bill.countDocuments({ stateCode: state.code, status: 'OVERDUE' }),
-            BinRegistration.distinct('userId', { stateCode: state.code }).then(ids => ids.length),
+            Bill.countDocuments({ stateCode: state.code, status: "PAID" }),
+            Bill.countDocuments({ stateCode: state.code, status: "PENDING" }),
+            Bill.countDocuments({ stateCode: state.code, status: "OVERDUE" }),
+            BinRegistration.distinct("userId", { stateCode: state.code }).then(
+              (ids) => ids.length,
+            ),
             User.countDocuments({
-              _id: { $in: await BinRegistration.distinct('userId', { stateCode: state.code }) },
+              _id: {
+                $in: await BinRegistration.distinct("userId", {
+                  stateCode: state.code,
+                }),
+              },
               lastLogin: { $gte: thirtyDaysAgo },
             }),
           ]);
 
           // Get revenue totals
-          const completedPayments = await Payment.find({ 
-            stateCode: state.code, 
-            status: 'SUCCESS' 
+          const completedPayments = await Payment.find({
+            stateCode: state.code,
+            status: "SUCCESS",
           });
-          const totalRevenue = completedPayments.reduce((sum, p) => sum + p.amount, 0);
+          const totalRevenue = completedPayments.reduce(
+            (sum, p) => sum + p.amount,
+            0,
+          );
 
           const monthlyPayments = await Payment.find({
             stateCode: state.code,
-            status: 'SUCCESS',
+            status: "SUCCESS",
             paidAt: { $gte: firstDayOfMonth },
           });
-          const monthlyRevenue = monthlyPayments.reduce((sum, p) => sum + p.amount, 0);
+          const monthlyRevenue = monthlyPayments.reduce(
+            (sum, p) => sum + p.amount,
+            0,
+          );
 
-          const collectionRate = totalBills > 0 ? ((paidBills / totalBills) * 100) : 0;
+          const collectionRate =
+            totalBills > 0 ? (paidBills / totalBills) * 100 : 0;
 
           return {
             stateCode: state.code,
@@ -764,26 +1069,26 @@ router.get(
             activeUsers,
             lastUpdated: new Date().toISOString(),
           };
-        })
+        }),
       );
 
       res.json({ stateRevenues: stateRevenueData });
     } catch (error) {
-      console.error('Get state revenues error:', error);
-      res.status(500).json({ error: 'Failed to get state revenue data' });
+      console.error("Get state revenues error:", error);
+      res.status(500).json({ error: "Failed to get state revenue data" });
     }
-  }
+  },
 );
 
 // STATE ADMIN: Register a new address and generate bin ID
 router.post(
-  '/addresses/register',
+  "/addresses/register",
   authenticate,
-  authorize('STATE_ADMIN', 'SUPER_ADMIN'),
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
   validate([
-    body('lgaName').notEmpty().trim(),
-    body('address').notEmpty().trim(),
-    body('customerRef').optional().trim(),
+    body("lgaName").notEmpty().trim(),
+    body("address").notEmpty().trim(),
+    body("customerRef").optional().trim(),
   ]),
   async (req: AuthRequest, res) => {
     try {
@@ -793,30 +1098,32 @@ router.post(
       // Get the state admin's state
       const adminUser = await User.findById(stateAdmin.userId);
       if (!adminUser || !adminUser.stateCode) {
-        return res.status(400).json({ error: 'State admin must be assigned to a state' });
+        return res
+          .status(400)
+          .json({ error: "State admin must be assigned to a state" });
       }
 
       const state = await State.findOne({ code: adminUser.stateCode });
       if (!state) {
-        return res.status(404).json({ error: 'State not found' });
+        return res.status(404).json({ error: "State not found" });
       }
 
       // Verify LGA exists in the state
-      const lga = state.lgas.find(l => l.name === lgaName);
+      const lga = state.lgas.find((l) => l.name === lgaName);
       if (!lga) {
-        return res.status(404).json({ error: 'LGA not found in this state' });
+        return res.status(404).json({ error: "LGA not found in this state" });
       }
 
       // Check if this address is already registered
-      const existingAddress = await BinRegistration.findOne({ 
+      const existingAddress = await BinRegistration.findOne({
         stateCode: state.code,
-        address: address.trim().toLowerCase()
+        address: address.trim().toLowerCase(),
       });
 
       if (existingAddress) {
-        return res.status(400).json({ 
-          error: 'This address is already registered',
-          binId: existingAddress.binId
+        return res.status(400).json({
+          error: "This address is already registered",
+          binId: existingAddress.binId,
         });
       }
 
@@ -834,7 +1141,7 @@ router.post(
       });
 
       res.status(201).json({
-        message: 'Address registered successfully with auto-generated bin ID',
+        message: "Address registered successfully with auto-generated bin ID",
         binRegistration: {
           binId: binRegistration.binId,
           stateCode: binRegistration.stateCode,
@@ -846,17 +1153,17 @@ router.post(
         },
       });
     } catch (error) {
-      console.error('Address registration error:', error);
-      res.status(500).json({ error: 'Failed to register address' });
+      console.error("Address registration error:", error);
+      res.status(500).json({ error: "Failed to register address" });
     }
-  }
+  },
 );
 
 // STATE ADMIN: Get all registered addresses in their state
 router.get(
-  '/addresses',
+  "/addresses",
   authenticate,
-  authorize('STATE_ADMIN', 'SUPER_ADMIN'),
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
   async (req: AuthRequest, res) => {
     try {
       const stateAdmin = req.user!;
@@ -864,33 +1171,35 @@ router.get(
       // Get the state admin's state
       const adminUser = await User.findById(stateAdmin.userId);
       if (!adminUser || !adminUser.stateCode) {
-        return res.status(400).json({ error: 'State admin must be assigned to a state' });
+        return res
+          .status(400)
+          .json({ error: "State admin must be assigned to a state" });
       }
 
-      const addresses = await BinRegistration.find({ 
-        stateCode: adminUser.stateCode 
+      const addresses = await BinRegistration.find({
+        stateCode: adminUser.stateCode,
       })
-        .populate('userId', 'firstName lastName email phone')
+        .populate("userId", "firstName lastName email phone")
         .sort({ createdAt: -1 });
 
       res.json({ addresses });
     } catch (error) {
-      console.error('Get addresses error:', error);
-      res.status(500).json({ error: 'Failed to get addresses' });
+      console.error("Get addresses error:", error);
+      res.status(500).json({ error: "Failed to get addresses" });
     }
-  }
+  },
 );
 
 // STATE ADMIN: Update address information
 router.put(
-  '/addresses/:addressId',
+  "/addresses/:addressId",
   authenticate,
-  authorize('STATE_ADMIN', 'SUPER_ADMIN'),
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
   validate([
-    param('addressId').notEmpty(),
-    body('address').optional().isString(),
-    body('lgaName').optional().isString(),
-    body('customerRef').optional().isString()
+    param("addressId").notEmpty(),
+    body("address").optional().isString(),
+    body("lgaName").optional().isString(),
+    body("customerRef").optional().isString(),
   ]),
   async (req: AuthRequest, res) => {
     try {
@@ -900,17 +1209,21 @@ router.put(
       const stateAdmin = req.user!;
       const adminUser = await User.findById(stateAdmin.userId);
       if (!adminUser || !adminUser.stateCode) {
-        return res.status(400).json({ error: 'State admin must be assigned to a state' });
+        return res
+          .status(400)
+          .json({ error: "State admin must be assigned to a state" });
       }
 
       // Find the address and verify it belongs to the admin's state
       const binRegistration = await BinRegistration.findById(addressId);
       if (!binRegistration) {
-        return res.status(404).json({ error: 'Address not found' });
+        return res.status(404).json({ error: "Address not found" });
       }
 
       if (binRegistration.stateCode !== adminUser.stateCode) {
-        return res.status(403).json({ error: 'Cannot update address from another state' });
+        return res
+          .status(403)
+          .json({ error: "Cannot update address from another state" });
       }
 
       // Update the address
@@ -920,26 +1233,28 @@ router.put(
 
       await binRegistration.save();
 
-      const updatedAddress = await BinRegistration.findById(addressId)
-        .populate('userId', 'firstName lastName email phone');
+      const updatedAddress = await BinRegistration.findById(addressId).populate(
+        "userId",
+        "firstName lastName email phone",
+      );
 
-      res.json({ 
-        message: 'Address updated successfully',
-        address: updatedAddress 
+      res.json({
+        message: "Address updated successfully",
+        address: updatedAddress,
       });
     } catch (error) {
-      console.error('Update address error:', error);
-      res.status(500).json({ error: 'Failed to update address' });
+      console.error("Update address error:", error);
+      res.status(500).json({ error: "Failed to update address" });
     }
-  }
+  },
 );
 
 // STATE ADMIN: Toggle address active status
 router.patch(
-  '/addresses/:addressId/toggle-status',
+  "/addresses/:addressId/toggle-status",
   authenticate,
-  authorize('STATE_ADMIN', 'SUPER_ADMIN'),
-  validate([param('addressId').notEmpty()]),
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  validate([param("addressId").notEmpty()]),
   async (req: AuthRequest, res) => {
     try {
       const { addressId } = req.params;
@@ -947,59 +1262,86 @@ router.patch(
       const stateAdmin = req.user!;
       const adminUser = await User.findById(stateAdmin.userId);
       if (!adminUser || !adminUser.stateCode) {
-        return res.status(400).json({ error: 'State admin must be assigned to a state' });
+        return res
+          .status(400)
+          .json({ error: "State admin must be assigned to a state" });
       }
 
       // Find the address and verify it belongs to the admin's state
       const binRegistration = await BinRegistration.findById(addressId);
       if (!binRegistration) {
-        return res.status(404).json({ error: 'Address not found' });
+        return res.status(404).json({ error: "Address not found" });
       }
 
       if (binRegistration.stateCode !== adminUser.stateCode) {
-        return res.status(403).json({ error: 'Cannot modify address from another state' });
+        return res
+          .status(403)
+          .json({ error: "Cannot modify address from another state" });
       }
 
       // Toggle the active status
       binRegistration.isActive = !binRegistration.isActive;
       await binRegistration.save();
 
-      const updatedAddress = await BinRegistration.findById(addressId)
-        .populate('userId', 'firstName lastName email phone');
+      const updatedAddress = await BinRegistration.findById(addressId).populate(
+        "userId",
+        "firstName lastName email phone",
+      );
 
-      res.json({ 
-        message: `Address ${binRegistration.isActive ? 'activated' : 'deactivated'} successfully`,
-        address: updatedAddress 
+      res.json({
+        message: `Address ${binRegistration.isActive ? "activated" : "deactivated"} successfully`,
+        address: updatedAddress,
       });
     } catch (error) {
-      console.error('Toggle address status error:', error);
-      res.status(500).json({ error: 'Failed to toggle address status' });
+      console.error("Toggle address status error:", error);
+      res.status(500).json({ error: "Failed to toggle address status" });
     }
-  }
+  },
 );
 
 // STATE ADMIN: Generate monthly bills
-router.post('/bills/generate', authenticate, authorize('STATE_ADMIN', 'SUPER_ADMIN'), async (req: AuthRequest, res) => {
-  try {
-    const adminUser = await User.findById(req.user!.userId);
-    if (!adminUser?.stateCode) return res.status(400).json({ error: 'State admin must be assigned to a state' });
-    const result = await generateMonthlyBillsForState(adminUser.stateCode);
-    res.json({ message: 'Bills generated', stateCode: adminUser.stateCode, ...result });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to generate bills' });
-  }
-});
+router.post(
+  "/bills/generate",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  async (req: AuthRequest, res) => {
+    try {
+      const adminUser = await User.findById(req.user!.userId);
+      if (!adminUser?.stateCode)
+        return res
+          .status(400)
+          .json({ error: "State admin must be assigned to a state" });
+      const result = await generateMonthlyBillsForState(adminUser.stateCode);
+      res.json({
+        message: "Bills generated",
+        stateCode: adminUser.stateCode,
+        ...result,
+      });
+    } catch (error: any) {
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to generate bills" });
+    }
+  },
+);
 
-router.post('/bills/generate/:binId', authenticate, authorize('STATE_ADMIN', 'SUPER_ADMIN'), validate([param('binId').notEmpty()]), async (req: AuthRequest, res) => {
-  try {
-    const binReg = await BinRegistration.findOne({ binId: req.params.binId });
-    if (!binReg) return res.status(404).json({ error: 'Bin not found' });
-    const bill = await generateBillForBin(binReg._id);
-    res.json({ message: 'Bill generated', bill });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to generate bill' });
-  }
-});
+router.post(
+  "/bills/generate/:binId",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  validate([param("binId").notEmpty()]),
+  async (req: AuthRequest, res) => {
+    try {
+      const binReg = await BinRegistration.findOne({ binId: req.params.binId });
+      if (!binReg) return res.status(404).json({ error: "Bin not found" });
+      const bill = await generateBillForBin(binReg._id);
+      res.json({ message: "Bill generated", bill });
+    } catch (error: any) {
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to generate bill" });
+    }
+  },
+);
 
 export default router;
-

@@ -1,9 +1,9 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from "mongoose";
 
 export enum UserRole {
-  USER = 'USER',
-  STATE_ADMIN = 'STATE_ADMIN',
-  SUPER_ADMIN = 'SUPER_ADMIN',
+  USER = "USER",
+  STATE_ADMIN = "STATE_ADMIN",
+  SUPER_ADMIN = "SUPER_ADMIN",
 }
 
 export interface Permission {
@@ -42,16 +42,22 @@ const userSchema = new Schema<IUser>(
     password: { type: String, required: true },
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
-    role: { type: String, enum: Object.values(UserRole), default: UserRole.USER },
+    role: {
+      type: String,
+      enum: Object.values(UserRole),
+      default: UserRole.USER,
+    },
     stateCode: { type: String },
-    permissions: [{
-      id: { type: String },
-      name: { type: String },
-      description: { type: String },
-      canView: { type: Boolean, default: false },
-      canCreate: { type: Boolean, default: false },
-      canUpdate: { type: Boolean, default: false },
-    }],
+    permissions: [
+      {
+        id: { type: String },
+        name: { type: String },
+        description: { type: String },
+        canView: { type: Boolean, default: false },
+        canCreate: { type: Boolean, default: false },
+        canUpdate: { type: Boolean, default: false },
+      },
+    ],
     isActive: { type: Boolean, default: true },
     isVerified: { type: Boolean, default: false },
     emailVerified: { type: Boolean, default: false },
@@ -62,11 +68,10 @@ const userSchema = new Schema<IUser>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
+userSchema.index({ stateCode: 1 });
 userSchema.index({ stateCode: 1 });
 
-export const User = mongoose.model<IUser>('User', userSchema);
+export const User = mongoose.model<IUser>("User", userSchema);

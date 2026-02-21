@@ -1,10 +1,10 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from "mongoose";
 
 export enum BillStatus {
-  PENDING = 'PENDING',
-  PAID = 'PAID',
-  OVERDUE = 'OVERDUE',
-  CANCELLED = 'CANCELLED',
+  PENDING = "PENDING",
+  PAID = "PAID",
+  OVERDUE = "OVERDUE",
+  CANCELLED = "CANCELLED",
 }
 
 export interface IBill extends Document {
@@ -28,13 +28,21 @@ export interface IBill extends Document {
 const billSchema = new Schema<IBill>(
   {
     billNumber: { type: String, required: true, unique: true },
-    binRegistrationId: { type: Schema.Types.ObjectId, ref: 'BinRegistration', required: true },
-    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    binRegistrationId: {
+      type: Schema.Types.ObjectId,
+      ref: "BinRegistration",
+      required: true,
+    },
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     stateCode: { type: String, required: true },
     zoneName: { type: String },
     amount: { type: Number, required: true },
     dueDate: { type: Date, required: true },
-    status: { type: String, enum: Object.values(BillStatus), default: BillStatus.PENDING },
+    status: {
+      type: String,
+      enum: Object.values(BillStatus),
+      default: BillStatus.PENDING,
+    },
     paidAt: { type: Date },
     paidAmount: { type: Number },
     billingPeriod: { type: String, required: true },
@@ -43,14 +51,13 @@ const billSchema = new Schema<IBill>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 billSchema.index({ userId: 1 });
 billSchema.index({ stateCode: 1 });
 billSchema.index({ binRegistrationId: 1 });
-billSchema.index({ billNumber: 1 });
 billSchema.index({ status: 1 });
 billSchema.index({ dueDate: 1 });
 
-export const Bill = mongoose.model<IBill>('Bill', billSchema);
+export const Bill = mongoose.model<IBill>("Bill", billSchema);

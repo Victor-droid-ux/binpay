@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { authApi, billsApi, paymentsApi } from "@/lib/api";
+import { useToast, toast } from "@/hooks/use-toast";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -341,7 +342,7 @@ export default function DashboardPage() {
 
   const downloadBillPDF = async (billId: string, binId: string) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       if (!token) {
         toast({
           title: "Error",
@@ -431,9 +432,9 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-yellow-50">
       {/* Header */}
-      <header className="bg-white border-b">
+      <header className="bg-white/90 border-b shadow-sm backdrop-blur-md">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -524,24 +525,22 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-2 sm:px-4 py-8 max-w-7xl">
         {/* Welcome Section */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+        <div className="mb-8 text-center">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-primary mb-2 tracking-tight drop-shadow-md">
             Welcome back, {user?.name || "User"}!
           </h1>
-          <p className="text-gray-600">
-            Manage your waste bin payments across Nigeria
+          <p className="text-lg text-gray-700 max-w-2xl mx-auto">
+            Manage your <span className="font-semibold text-green-700">waste bin payments</span> across Nigeria
           </p>
         </div>
-
         {error && (
           <Alert variant="destructive" className="mb-6">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-
         {/* Monthly Bill Amount Display */}
         {stateBillingInfo && (
           <Alert className="mb-6 border-green-600 bg-green-50">
@@ -555,121 +554,135 @@ export default function DashboardPage() {
             </AlertDescription>
           </Alert>
         )}
-
+        {/* Bin Full Notification Button */}
+        <Alert className="mb-6 border-yellow-600 bg-yellow-50">
+          <AlertDescription className="text-yellow-900">
+            <div className="flex justify-center mb-8">
+              <Button
+                className="bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 text-white font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 hover:from-green-500 hover:to-red-600 transition-all duration-200 text-lg flex items-center gap-2"
+                onClick={async () => {
+                  setError("");
+                  try {
+                    await import("@/lib/api").then(({ adminApi }) =>
+                      adminApi.notifyBinFull(),
+                    );
+                    window.alert(
+                      "Your state admin has been notified that your bin is full!",
+                    );
+                  } catch (err: any) {
+                    if (err?.message?.toLowerCase().includes("bin") || err?.response?.data?.message?.toLowerCase().includes("bin")) {
+                      setError("Please link your bin before notifying your admin.");
+                    } else {
+                      setError("Failed to notify state admin. Please try again.");
+                    }
+                  }
+                }}
+                aria-label="Notify State Admin Bin Full"
+              >
+                <span role="img" aria-label="bin full">
+                  🗑️
+                </span>
+                Bin Full? Notify State Admin
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
         {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <CreditCard className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">
-                    Total Paid
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {isLoadingStats ? (
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                    ) : (
-                      `₦${stats.totalPaid.toLocaleString()}`
-                    )}
-                  </p>
-                </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+          <Card className="bg-gradient-to-br from-green-100/80 to-green-50 border-green-200 shadow-md">
+            <CardContent className="p-6 flex items-center gap-4">
+              <div className="w-14 h-14 bg-green-200 rounded-xl flex items-center justify-center shadow">
+                <CreditCard className="w-7 h-7 text-green-700" />
               </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Trash2 className="w-6 h-6 text-blue-600" />
-                </div>
-                <div className="ml-4 flex-1">
-                  <p className="text-sm font-medium text-gray-600">
-                    Active Bins
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {isLoadingBins ? (
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                    ) : (
-                      userBins.length
-                    )}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setActiveTab("my-bins")}
-                  className="text-blue-600 hover:text-blue-700"
-                >
-                  View →
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-                  <AlertCircle className="w-6 h-6 text-orange-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Due Soon</p>
-                  {isLoadingBills ? (
+              <div>
+                <p className="text-sm font-semibold text-green-800">Total Paid</p>
+                <p className="text-2xl font-extrabold text-green-900">
+                  {isLoadingStats ? (
                     <Loader2 className="w-6 h-6 animate-spin" />
-                  ) : upcomingBills.length > 0 ? (
-                    <>
-                      <p className="text-2xl font-bold text-gray-900">
-                        ₦{upcomingBills[0].amount.toLocaleString()}
-                      </p>
-                      <p className="text-xs text-orange-600 mt-1">
-                        Due{" "}
-                        {new Date(
-                          upcomingBills[0].dueDate,
-                        ).toLocaleDateString()}
-                      </p>
-                    </>
                   ) : (
-                    <p className="text-2xl font-bold text-gray-900">₦0</p>
+                    `₦${stats.totalPaid.toLocaleString()}`
                   )}
-                </div>
+                </p>
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <CheckCircle className="w-6 h-6 text-purple-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">
-                    This Month
-                  </p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {isLoadingPayments ? (
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                    ) : (
-                      `₦${recentPayments
-                        .filter((p) => {
-                          const paymentDate = new Date(p.paidAt || p.createdAt);
-                          const now = new Date();
-                          return (
-                            paymentDate.getMonth() === now.getMonth() &&
-                            paymentDate.getFullYear() === now.getFullYear()
-                          );
-                        })
-                        .reduce((sum, p) => sum + p.amount, 0)
-                        .toLocaleString()}`
-                    )}
-                  </p>
-                </div>
+          <Card className="bg-gradient-to-br from-blue-100/80 to-blue-50 border-blue-200 shadow-md">
+            <CardContent className="p-6 flex items-center gap-4">
+              <div className="w-14 h-14 bg-blue-200 rounded-xl flex items-center justify-center shadow">
+                <Trash2 className="w-7 h-7 text-blue-700" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-blue-800">Active Bins</p>
+                <p className="text-2xl font-extrabold text-blue-900">
+                  {isLoadingBins ? (
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  ) : (
+                    userBins.length
+                  )}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setActiveTab("my-bins")}
+                className="text-blue-700 hover:text-blue-900 font-semibold"
+              >
+                View →
+              </Button>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-orange-100/80 to-yellow-50 border-orange-200 shadow-md">
+            <CardContent className="p-6 flex items-center gap-4">
+              <div className="w-14 h-14 bg-orange-200 rounded-xl flex items-center justify-center shadow">
+                <AlertCircle className="w-7 h-7 text-orange-700" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-orange-800">Due Soon</p>
+                {isLoadingBills ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : upcomingBills.length > 0 ? (
+                  <>
+                    <p className="text-2xl font-extrabold text-orange-900">
+                      ₦{upcomingBills[0].amount.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-orange-700 mt-1">
+                      Due {new Date(upcomingBills[0].dueDate).toLocaleDateString()}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-2xl font-extrabold text-orange-900">₦0</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-purple-100/80 to-pink-50 border-purple-200 shadow-md">
+            <CardContent className="p-6 flex items-center gap-4">
+              <div className="w-14 h-14 bg-purple-200 rounded-xl flex items-center justify-center shadow">
+                <CheckCircle className="w-7 h-7 text-purple-700" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-purple-800">This Month</p>
+                <p className="text-2xl font-extrabold text-purple-900">
+                  {isLoadingPayments ? (
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  ) : (
+                    `₦${recentPayments
+                      .filter((p) => {
+                        const paymentDate = new Date(p.paidAt || p.createdAt);
+                        const now = new Date();
+                        return (
+                          paymentDate.getMonth() === now.getMonth() &&
+                          paymentDate.getFullYear() === now.getFullYear()
+                        );
+                      })
+                      .reduce((sum, p) => sum + p.amount, 0)
+                      .toLocaleString()}`
+                  )}
+                </p>
               </div>
             </CardContent>
           </Card>
         </div>
-
         {/* Main Content */}
         {activeTab === "pay-bill" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -999,7 +1012,6 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
-
         {activeTab === "history" && (
           <Card>
             <CardHeader>
@@ -1093,7 +1105,6 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         )}
-
         {activeTab === "my-bins" && (
           <Card>
             <CardHeader>
@@ -1205,7 +1216,6 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         )}
-
         {activeTab === "notifications" && (
           <Card>
             <CardHeader>
@@ -1324,7 +1334,6 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         )}
-
         {activeTab === "profile" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <Card>
