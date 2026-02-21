@@ -219,15 +219,22 @@ async function seed() {
         state.lgas && state.lgas.length > 0 ? state.lgas[0].name : "Central";
       const sampleAddress = `1, Main Street, ${sampleLGA}`;
       const binId = await generateBinId(state.code);
+      // For Lagos, keep bin linked to state admin. For Enugu, link to test user.
+      let binUserId = stateAdmin._id;
+      if (state.code === "enugu") {
+        binUserId = testUser._id;
+      }
       await BinRegistration.create({
         binId,
-        userId: stateAdmin._id, // Temporarily assign to state admin
+        userId: binUserId,
         stateCode: state.code,
         lgaName: sampleLGA,
         address: sampleAddress,
         isActive: true,
       });
-      console.log(`  🏠 Created sample bin registration for ${state.name}`);
+      console.log(
+        `  🏠 Created sample bin registration for ${state.name} (linked to ${state.code === "enugu" ? "test user" : "state admin"})`,
+      );
     }
 
     console.log("🎉 Seeding completed!");

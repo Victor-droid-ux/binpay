@@ -163,11 +163,15 @@ router.post(
     try {
       const userId = req.user?.userId;
       if (!userId) {
+        console.warn(`[NOTIFY BIN FULL] No userId in request.`);
         return res.status(401).json({ error: "Authentication required" });
       }
 
       const user = await User.findById(userId);
       if (!user || !user.stateCode) {
+        console.warn(
+          `[NOTIFY BIN FULL] User or state not found. userId: ${userId}`,
+        );
         return res.status(400).json({ error: "User or state not found" });
       }
 
@@ -179,6 +183,9 @@ router.post(
       }).sort({ createdAt: -1 });
 
       if (!binRegistration) {
+        console.warn(
+          `[NOTIFY BIN FULL] No active bin linked for userId: ${userId}, state: ${user.stateCode}`,
+        );
         return res
           .status(400)
           .json({ error: "Please link your bin before notifying your admin" });
@@ -192,6 +199,9 @@ router.post(
       });
 
       if (!stateAdmins.length) {
+        console.warn(
+          `[NOTIFY BIN FULL] No state admin found for state: ${user.stateCode}`,
+        );
         return res
           .status(404)
           .json({ error: "No state admin found for your state" });

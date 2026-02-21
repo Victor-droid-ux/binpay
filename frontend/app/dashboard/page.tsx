@@ -136,6 +136,13 @@ export default function DashboardPage() {
         await loadUpcomingBills();
         await loadUserBins();
         await loadNotifications();
+        // Check if user is linked to any bin
+        const bins = await billsApi.getUserBins();
+        if (!bins.bins || bins.bins.length === 0) {
+          setError(
+            "You are not linked to any bin. Please register your address and link a bin to use all features.",
+          );
+        }
       } catch (err: any) {
         console.error("Authentication error:", err);
         // Clear invalid tokens
@@ -259,9 +266,21 @@ export default function DashboardPage() {
       setSearchResults([]);
       setAddressSearch({ address: "", stateCode: "", lgaName: "" });
       await loadUserBins(); // Reload bins
-      alert("Bin linked successfully!");
+      setError("");
+      alert(
+        "Bin linked successfully! You can now use all features including Notify State Admin.",
+      );
     } catch (err: any) {
-      setError(err.message || "Failed to link bin");
+      // Show more detailed error messages for common backend errors
+      let errorMsg = err?.message || "Failed to link bin";
+      if (err?.data?.details && Array.isArray(err.data.details)) {
+        // Validation errors from backend
+        errorMsg = err.data.details.map((d: any) => d.msg).join("; ");
+      } else if (err?.data?.error) {
+        // Specific backend error
+        errorMsg = err.data.error;
+      }
+      setError(errorMsg);
     }
   };
 
@@ -310,27 +329,38 @@ export default function DashboardPage() {
       }
 
       if (!response.currentBill) {
-        setError(
-          "No active bills found for this bin. Please contact your waste management authority.",
-        );
+        try {
+          setError("");
+          const result = await billsApi.linkBin(billLookup.binId);
+          setShowAddressSearch(false);
+          setSearchResults([]);
+          setAddressSearch({ address: "", stateCode: "", lgaName: "" });
+          await loadUserBins(); // Reload bins
+          setError("");
+          // Show feedback based on backend validation
+          if (result && result.message) {
+            alert(result.message);
+          } else {
+            alert(
+              "Bin linked successfully! You can now use all features including Notify State Admin.",
+            );
+          }
+        } catch (err: any) {
+          // Show more detailed error messages for common backend errors
+          let errorMsg = err?.message || "Failed to link bin";
+          if (err?.data?.details && Array.isArray(err.data.details)) {
+            // Validation errors from backend
+            errorMsg = err.data.details.map((d: any) => d.msg).join("; ");
+          } else if (err?.data?.error) {
+            // Specific backend error
+            errorMsg = err.data.error;
+          }
+          setError(errorMsg);
+        }
         setFoundBill(null);
-        return;
       }
-
-      const bill = response.currentBill;
-      const binReg = response.binRegistration;
-
-      setFoundBill({
-        id: bill._id,
-        binId: binReg.binId,
-        address: `${binReg.address}, ${binReg.lgaName}`,
-        amount: bill.amount,
-        dueDate: new Date(bill.dueDate).toLocaleDateString(),
-        status: bill.status.toLowerCase(),
-        zone: binReg.lgaName,
-      });
     } catch (err: any) {
-      setError(err.message || "Failed to find bill");
+      setError(err?.message || "Failed to lookup bill");
       setFoundBill(null);
     }
   };
@@ -532,7 +562,11 @@ export default function DashboardPage() {
             Welcome back, {user?.name || "User"}!
           </h1>
           <p className="text-lg text-gray-700 max-w-2xl mx-auto">
-            Manage your <span className="font-semibold text-green-700">waste bin payments</span> across Nigeria
+            Manage your{" "}
+            <span className="font-semibold text-green-700">
+              waste bin payments
+            </span>{" "}
+            across Nigeria
           </p>
         </div>
         {error && (
@@ -570,11 +604,21 @@ export default function DashboardPage() {
                       "Your state admin has been notified that your bin is full!",
                     );
                   } catch (err: any) {
-                    if (err?.message?.toLowerCase().includes("bin") || err?.response?.data?.message?.toLowerCase().includes("bin")) {
-                      setError("Please link your bin before notifying your admin.");
-                    } else {
-                      setError("Failed to notify state admin. Please try again.");
+                    // Show more detailed error messages for common backend errors
+                    let errorMsg =
+                      err?.message ||
+                      "Failed to notify state admin. Please try again.";
+                    if (err?.data?.details && Array.isArray(err.data.details)) {
+                      errorMsg = err.data.details
+                        .map((d: any) => d.msg)
+                        .join("; ");
+                    } else if (err?.data?.error) {
+                      errorMsg = err.data.error;
+                    } else if (err?.message?.toLowerCase().includes("bin")) {
+                      errorMsg =
+                        "Please link your bin before notifying your admin.";
                     }
+                    setError(errorMsg);
                   }
                 }}
                 aria-label="Notify State Admin Bin Full"
@@ -595,7 +639,9 @@ export default function DashboardPage() {
                 <CreditCard className="w-7 h-7 text-green-700" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-green-800">Total Paid</p>
+                <p className="text-sm font-semibold text-green-800">
+                  Total Paid
+                </p>
                 <p className="text-2xl font-extrabold text-green-900">
                   {isLoadingStats ? (
                     <Loader2 className="w-6 h-6 animate-spin" />
@@ -612,7 +658,9 @@ export default function DashboardPage() {
                 <Trash2 className="w-7 h-7 text-blue-700" />
               </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold text-blue-800">Active Bins</p>
+                <p className="text-sm font-semibold text-blue-800">
+                  Active Bins
+                </p>
                 <p className="text-2xl font-extrabold text-blue-900">
                   {isLoadingBins ? (
                     <Loader2 className="w-6 h-6 animate-spin" />
@@ -637,7 +685,9 @@ export default function DashboardPage() {
                 <AlertCircle className="w-7 h-7 text-orange-700" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-orange-800">Due Soon</p>
+                <p className="text-sm font-semibold text-orange-800">
+                  Due Soon
+                </p>
                 {isLoadingBills ? (
                   <Loader2 className="w-6 h-6 animate-spin" />
                 ) : upcomingBills.length > 0 ? (
@@ -646,7 +696,8 @@ export default function DashboardPage() {
                       ₦{upcomingBills[0].amount.toLocaleString()}
                     </p>
                     <p className="text-xs text-orange-700 mt-1">
-                      Due {new Date(upcomingBills[0].dueDate).toLocaleDateString()}
+                      Due{" "}
+                      {new Date(upcomingBills[0].dueDate).toLocaleDateString()}
                     </p>
                   </>
                 ) : (
@@ -661,7 +712,9 @@ export default function DashboardPage() {
                 <CheckCircle className="w-7 h-7 text-purple-700" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-purple-800">This Month</p>
+                <p className="text-sm font-semibold text-purple-800">
+                  This Month
+                </p>
                 <p className="text-2xl font-extrabold text-purple-900">
                   {isLoadingPayments ? (
                     <Loader2 className="w-6 h-6 animate-spin" />
