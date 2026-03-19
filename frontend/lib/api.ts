@@ -1,5 +1,4 @@
 // API Configuration and utilities
-// API Configuration and utilities
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
@@ -25,12 +24,10 @@ async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     "Content-Type": "application/json",
   };
 
-  // Merge with any additional headers
   if (fetchOptions.headers) {
     Object.assign(headers, fetchOptions.headers);
   }
 
-  // Add auth token if required
   if (requiresAuth) {
     const token = localStorage.getItem("accessToken");
     if (token) {
@@ -67,18 +64,10 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify(credentials),
     });
-
-    // Store tokens and user data
-    if (data.accessToken) {
-      localStorage.setItem("accessToken", data.accessToken);
-    }
-    if (data.refreshToken) {
+    if (data.accessToken) localStorage.setItem("accessToken", data.accessToken);
+    if (data.refreshToken)
       localStorage.setItem("refreshToken", data.refreshToken);
-    }
-    if (data.user) {
-      localStorage.setItem("user", JSON.stringify(data.user));
-    }
-
+    if (data.user) localStorage.setItem("user", JSON.stringify(data.user));
     return data;
   },
 
@@ -96,47 +85,30 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify(userData),
     });
-
-    // Store tokens and user data
-    if (data.accessToken) {
-      localStorage.setItem("accessToken", data.accessToken);
-    }
-    if (data.refreshToken) {
+    if (data.accessToken) localStorage.setItem("accessToken", data.accessToken);
+    if (data.refreshToken)
       localStorage.setItem("refreshToken", data.refreshToken);
-    }
-    if (data.user) {
-      localStorage.setItem("user", JSON.stringify(data.user));
-    }
-
+    if (data.user) localStorage.setItem("user", JSON.stringify(data.user));
     return data;
   },
 
   refreshToken: async () => {
     const refreshToken = localStorage.getItem("refreshToken");
-    if (!refreshToken) {
-      throw new Error("No refresh token available");
-    }
-
+    if (!refreshToken) throw new Error("No refresh token available");
     const data = await fetchApi("/auth/refresh-token", {
       method: "POST",
       body: JSON.stringify({ refreshToken }),
     });
-
-    if (data.accessToken) {
-      localStorage.setItem("accessToken", data.accessToken);
-    }
-
+    if (data.accessToken) localStorage.setItem("accessToken", data.accessToken);
     return data;
   },
 
   getCurrentUser: async () => {
-    const data = await fetchApi("/auth/me", {
-      requiresAuth: true,
-    });
-    // Backend returns { user: {...} }, extract the user object
+    const data = await fetchApi("/auth/me", { requiresAuth: true });
     return data.user || data;
   },
 
+  // FIX: logout clears all three keys set during login/register
   logout: () => {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
@@ -144,8 +116,22 @@ export const authApi = {
   },
 };
 
-// Bills API
+// Bills API (user-facing)
 export const billsApi = {
+  // Register a new address for approval
+  registerAddress: async (data: {
+    lgaName: string;
+    address: string;
+    stateCode?: string;
+    customerRef?: string;
+  }) => {
+    return fetchApi("/admin/addresses/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+      requiresAuth: true,
+    });
+  },
+
   getAll: async (filters?: {
     status?: string;
     lgaId?: string;
@@ -158,22 +144,15 @@ export const billsApi = {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-
-    return fetchApi(`/bills?${params.toString()}`, {
-      requiresAuth: true,
-    });
+    return fetchApi(`/bills?${params.toString()}`, { requiresAuth: true });
   },
 
   getById: async (id: string) => {
-    return fetchApi(`/bills/${id}`, {
-      requiresAuth: true,
-    });
+    return fetchApi(`/bills/${id}`, { requiresAuth: true });
   },
 
   getByBinId: async (binId: string) => {
-    return fetchApi(`/bills/lookup/${binId}`, {
-      requiresAuth: true,
-    });
+    return fetchApi(`/bills/lookup/${binId}`, { requiresAuth: true });
   },
 
   create: async (billData: any) => {
@@ -184,15 +163,6 @@ export const billsApi = {
     });
   },
 
-  update: async (id: string, billData: any) => {
-    return fetchApi(`/bills/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(billData),
-      requiresAuth: true,
-    });
-  },
-
-  // Bin registration
   registerBin: async (data: {
     stateCode: string;
     lgaName: string;
@@ -207,11 +177,9 @@ export const billsApi = {
   },
 
   getUserBins: async () => {
-    return fetchApi("/bills/bins", {
-      requiresAuth: true,
-    });
+    return fetchApi("/bills/bins", { requiresAuth: true });
   },
-  // Search for address to find bin ID
+
   searchAddress: async (params: {
     address?: string;
     stateCode?: string;
@@ -221,13 +189,11 @@ export const billsApi = {
     if (params.address) queryParams.append("address", params.address);
     if (params.stateCode) queryParams.append("stateCode", params.stateCode);
     if (params.lgaName) queryParams.append("lgaName", params.lgaName);
-
     return fetchApi(`/bills/bins/search?${queryParams.toString()}`, {
       requiresAuth: true,
     });
   },
 
-  // Link bin to user account
   linkBin: async (binId: string) => {
     return fetchApi("/bills/bins/link", {
       method: "POST",
@@ -236,7 +202,6 @@ export const billsApi = {
     });
   },
 
-  // Unlink bin from user account
   unlinkBin: async (binId: string) => {
     return fetchApi("/bills/bins/unlink", {
       method: "POST",
@@ -245,21 +210,15 @@ export const billsApi = {
     });
   },
 
-  // Get user dashboard statistics
   getUserStats: async () => {
-    return fetchApi("/bills/user/stats", {
-      requiresAuth: true,
-    });
+    return fetchApi("/bills/user/stats", { requiresAuth: true });
   },
 
-  // Get user notifications
+  // User notifications (hits /bills/notifications — user-specific route)
   getNotifications: async () => {
-    return fetchApi("/bills/notifications", {
-      requiresAuth: true,
-    });
+    return fetchApi("/bills/notifications", { requiresAuth: true });
   },
 
-  // Mark notification as read
   markNotificationRead: async (notificationId: string) => {
     return fetchApi(`/bills/notifications/${notificationId}/read`, {
       method: "PUT",
@@ -267,7 +226,6 @@ export const billsApi = {
     });
   },
 
-  // Mark all notifications as read
   markAllNotificationsRead: async () => {
     return fetchApi("/bills/notifications/mark-all-read", {
       method: "PUT",
@@ -275,7 +233,6 @@ export const billsApi = {
     });
   },
 
-  // Get state billing information
   getStateBilling: async (stateCode: string) => {
     return fetchApi(`/bills/state-billing/${stateCode}`, {
       requiresAuth: false,
@@ -296,16 +253,11 @@ export const paymentsApi = {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-
-    return fetchApi(`/payments?${params.toString()}`, {
-      requiresAuth: true,
-    });
+    return fetchApi(`/payments?${params.toString()}`, { requiresAuth: true });
   },
 
   getById: async (id: string) => {
-    return fetchApi(`/payments/${id}`, {
-      requiresAuth: true,
-    });
+    return fetchApi(`/payments/${id}`, { requiresAuth: true });
   },
 
   initialize: async (paymentData: {
@@ -320,21 +272,41 @@ export const paymentsApi = {
   },
 
   verify: async (reference: string) => {
-    return fetchApi(`/payments/verify/${reference}`, {
-      requiresAuth: true,
-    });
+    return fetchApi(`/payments/verify/${reference}`, { requiresAuth: true });
   },
 };
 
 // Admin API
 export const adminApi = {
-  // Get notifications for the logged-in state admin
-  getNotifications: async () => {
-    return fetchApi("/admin/notifications", {
+  // Approve address registration — expects MongoDB _id of the BinRegistration document
+  approveAddress: async (addressId: string) => {
+    return fetchApi(`/admin/addresses/${addressId}/approve`, {
+      method: "PATCH",
       requiresAuth: true,
     });
   },
-  // Notify state admin that user's bin is full
+
+  // Reject address registration — expects MongoDB _id of the BinRegistration document
+  rejectAddress: async (addressId: string) => {
+    return fetchApi(`/admin/addresses/${addressId}/reject`, {
+      method: "PATCH",
+      requiresAuth: true,
+    });
+  },
+
+  // Get notifications for the logged-in state admin
+  getNotifications: async () => {
+    return fetchApi("/admin/notifications", { requiresAuth: true });
+  },
+
+  // FIX: added admin mark-notification-read endpoint
+  markNotificationRead: async (notificationId: string) => {
+    return fetchApi(`/admin/notifications/${notificationId}/read`, {
+      method: "PUT",
+      requiresAuth: true,
+    });
+  },
+
   notifyBinFull: async () => {
     return fetchApi("/admin/notify-bin-full", {
       method: "POST",
@@ -342,17 +314,15 @@ export const adminApi = {
     });
   },
 
-  // Send bulk overdue notifications to users
   sendBulkOverdueNotifications: async (stateCode: string) => {
     return fetchApi(`/admin/notifications/overdue/${stateCode}`, {
       method: "POST",
       requiresAuth: true,
     });
   },
+
   getStateStats: async (stateCode: string) => {
-    return fetchApi(`/admin/stats/${stateCode}`, {
-      requiresAuth: true,
-    });
+    return fetchApi(`/admin/stats/${stateCode}`, { requiresAuth: true });
   },
 
   getStateBills: async (
@@ -365,7 +335,6 @@ export const adminApi = {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-
     return fetchApi(`/admin/bills/${stateCode}?${params.toString()}`, {
       requiresAuth: true,
     });
@@ -381,7 +350,6 @@ export const adminApi = {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-
     return fetchApi(`/admin/payments/${stateCode}?${params.toString()}`, {
       requiresAuth: true,
     });
@@ -397,7 +365,6 @@ export const adminApi = {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-
     return fetchApi(`/admin/users/${stateCode}?${params.toString()}`, {
       requiresAuth: true,
     });
@@ -410,21 +377,11 @@ export const adminApi = {
         if (value !== undefined) params.append(key, value.toString());
       });
     }
-
     return fetchApi(`/admin/users?${params.toString()}`, {
       requiresAuth: true,
     });
   },
 
-  updateUserStatus: async (userId: string, isActive: boolean) => {
-    return fetchApi(`/admin/users/${userId}/status`, {
-      method: "PUT",
-      body: JSON.stringify({ isActive }),
-      requiresAuth: true,
-    });
-  },
-
-  // Address/Bin registration for state admins
   registerAddress: async (data: {
     lgaName: string;
     address: string;
@@ -438,12 +395,15 @@ export const adminApi = {
   },
 
   getAddresses: async () => {
-    return fetchApi("/admin/addresses", {
-      requiresAuth: true,
-    });
+    return fetchApi("/admin/addresses", { requiresAuth: true });
   },
 
-  // Update monthly bill amount for state
+  // Look up a single BinRegistration by its binId string (e.g. "EN000001")
+  // Used as a fallback when old notifications don't carry addressId in metadata
+  getAddressByBinId: async (binId: string) => {
+    return fetchApi(`/admin/addresses/by-bin/${binId}`, { requiresAuth: true });
+  },
+
   updateMonthlyBillAmount: async (amount: number) => {
     return fetchApi("/admin/billing/monthly-amount", {
       method: "PUT",
@@ -452,7 +412,6 @@ export const adminApi = {
     });
   },
 
-  // Generate monthly bills for all active bins in state
   generateMonthlyBills: async () => {
     return fetchApi("/admin/bills/generate", {
       method: "POST",
@@ -460,7 +419,6 @@ export const adminApi = {
     });
   },
 
-  // Generate bill for specific bin
   generateBillForBin: async (binId: string) => {
     return fetchApi(`/admin/bills/generate/${binId}`, {
       method: "POST",
@@ -470,11 +428,7 @@ export const adminApi = {
 
   updateAddress: async (
     addressId: string,
-    data: {
-      address?: string;
-      lgaName?: string;
-      customerRef?: string;
-    },
+    data: { address?: string; lgaName?: string; customerRef?: string },
   ) => {
     return fetchApi(`/admin/addresses/${addressId}`, {
       method: "PUT",
@@ -493,23 +447,13 @@ export const adminApi = {
 
 // Super Admin API
 export const superAdminApi = {
-  getStats: async () => {
-    return fetchApi("/admin/super/stats", {
-      requiresAuth: true,
-    });
-  },
+  getStats: async () => fetchApi("/admin/super/stats", { requiresAuth: true }),
 
-  getStateRevenues: async () => {
-    return fetchApi("/admin/super/state-revenues", {
-      requiresAuth: true,
-    });
-  },
+  getStateRevenues: async () =>
+    fetchApi("/admin/super/state-revenues", { requiresAuth: true }),
 
-  getAllStateAdmins: async () => {
-    return fetchApi("/admin/super/state-admins", {
-      requiresAuth: true,
-    });
-  },
+  getAllStateAdmins: async () =>
+    fetchApi("/admin/super/state-admins", { requiresAuth: true }),
 
   createStateAdmin: async (data: {
     email: string;
@@ -534,12 +478,11 @@ export const superAdminApi = {
     });
   },
 
-  toggleStateAdminStatus: async (adminId: string) => {
-    return fetchApi(`/admin/super/state-admins/${adminId}/toggle-status`, {
+  toggleStateAdminStatus: async (adminId: string) =>
+    fetchApi(`/admin/super/state-admins/${adminId}/toggle-status`, {
       method: "PATCH",
       requiresAuth: true,
-    });
-  },
+    }),
 
   updateStateAdmin: async (
     adminId: string,
@@ -557,19 +500,17 @@ export const superAdminApi = {
     });
   },
 
-  deleteStateAdmin: async (adminId: string) => {
-    return fetchApi(`/admin/super/state-admins/${adminId}`, {
+  deleteStateAdmin: async (adminId: string) =>
+    fetchApi(`/admin/super/state-admins/${adminId}`, {
       method: "DELETE",
       requiresAuth: true,
-    });
-  },
+    }),
 
   getAllStates: async (filters?: { isActive?: boolean }) => {
     const params = new URLSearchParams();
     if (filters?.isActive !== undefined) {
       params.append("isActive", filters.isActive.toString());
     }
-
     return fetchApi(`/admin/states?${params.toString()}`, {
       requiresAuth: true,
     });

@@ -15,6 +15,7 @@ import { sendNewBillSMS } from "../services/sms";
 import { generateBinId } from "../utils/binId";
 import { generateBillForBin } from "../utils/billGenerator";
 import mongoose from "mongoose";
+import { BinRegistrationStatus } from "../models/BinRegistration";
 
 const router = Router();
 

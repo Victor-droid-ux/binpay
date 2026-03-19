@@ -21,6 +21,7 @@ export interface IUser extends Document {
   password: string;
   firstName: string;
   lastName: string;
+  address?: string; // Accepts any address format
   role: UserRole;
   stateCode?: string;
   permissions?: Permission[];
@@ -42,6 +43,7 @@ const userSchema = new Schema<IUser>(
     password: { type: String, required: true },
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
+    address: { type: String }, // Accepts any address format
     role: {
       type: String,
       enum: Object.values(UserRole),

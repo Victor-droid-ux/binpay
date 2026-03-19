@@ -23,8 +23,114 @@ import {
 import bcrypt from "bcryptjs";
 import { sendEmail } from "../services/email";
 import { sendSMS } from "../services/sms";
+import { BinRegistrationStatus } from "../models/BinRegistration";
 
 const router = Router();
+
+// STATE ADMIN: Approve address registration
+router.patch(
+  "/addresses/:addressId/approve",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  validate([param("addressId").notEmpty()]),
+  async (req: AuthRequest, res) => {
+    try {
+      const { addressId } = req.params;
+      const address = await BinRegistration.findById(addressId);
+      if (!address) {
+        return res.status(404).json({ error: "Address not found" });
+      }
+      if (address.status !== BinRegistrationStatus.PENDING) {
+        return res
+          .status(400)
+          .json({ error: "Address is not pending approval" });
+      }
+      address.status = BinRegistrationStatus.APPROVED;
+      address.isActive = true;
+      // Generate bin ID if not already present
+      if (!address.binId) {
+        address.binId = await generateBinId(address.stateCode);
+      }
+      await address.save();
+
+      // Notify the user of approval and their bin ID
+      if (address.userId) {
+        const user = await User.findById(address.userId);
+        if (user) {
+          await Notification.create({
+            userId: user._id,
+            title: "Address Approved ✅",
+            message: `Your address (${address.address}, ${address.lgaName}, ${address.stateCode}) has been approved. Your Bin ID is: ${address.binId}`,
+            type: "ADDRESS_APPROVED",
+            isRead: false,
+            metadata: {
+              address: address.address,
+              lgaName: address.lgaName,
+              stateCode: address.stateCode,
+              binId: address.binId,
+              addressId: address._id.toString(),
+            },
+          });
+        }
+      }
+
+      res.json({ message: "Address approved", address });
+    } catch (error) {
+      console.error("Approve address error:", error);
+      res.status(500).json({ error: "Failed to approve address" });
+    }
+  },
+);
+
+// STATE ADMIN: Reject address registration
+router.patch(
+  "/addresses/:addressId/reject",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  validate([param("addressId").notEmpty()]),
+  async (req: AuthRequest, res) => {
+    try {
+      const { addressId } = req.params;
+      const address = await BinRegistration.findById(addressId);
+      if (!address) {
+        return res.status(404).json({ error: "Address not found" });
+      }
+      if (address.status !== BinRegistrationStatus.PENDING) {
+        return res
+          .status(400)
+          .json({ error: "Address is not pending approval" });
+      }
+      address.status = BinRegistrationStatus.REJECTED;
+      address.isActive = false;
+      await address.save();
+
+      // Notify the user of rejection
+      if (address.userId) {
+        const user = await User.findById(address.userId);
+        if (user) {
+          await Notification.create({
+            userId: user._id,
+            title: "Address Registration Rejected ❌",
+            message: `Your address registration (${address.address}, ${address.lgaName}, ${address.stateCode}) has been rejected. Please contact your state admin for more information.`,
+            type: "ADDRESS_REJECTED",
+            isRead: false,
+            metadata: {
+              address: address.address,
+              lgaName: address.lgaName,
+              stateCode: address.stateCode,
+              addressId: address._id.toString(),
+            },
+          });
+        }
+      }
+
+      res.json({ message: "Address rejected", address });
+    } catch (error) {
+      console.error("Reject address error:", error);
+      res.status(500).json({ error: "Failed to reject address" });
+    }
+  },
+);
 
 // Send bulk overdue notifications to users in a state
 router.post(
@@ -57,10 +163,8 @@ router.post(
         });
       }
 
-      // Fetch all users with overdue bills
       const users = await User.find({ _id: { $in: userIds } });
 
-      // Fetch all overdue bills with bin registration populated
       const overdueBillsPopulated = await Bill.find({
         stateCode,
         status: "OVERDUE",
@@ -74,7 +178,6 @@ router.post(
           if (!user) return;
           const bin = bill.binRegistrationId;
           let addressInfo = "(address not found)";
-          // Type guard: check if bin is an object and has address fields
           if (
             bin &&
             typeof bin === "object" &&
@@ -86,7 +189,6 @@ router.post(
           }
           const message = `Your bill (${bill.billNumber}) for address: ${addressInfo} is overdue. Please pay as soon as possible to avoid penalties.`;
 
-          // Create notification
           await Notification.create({
             userId: user._id,
             title: "Overdue Bill Alert",
@@ -96,20 +198,14 @@ router.post(
             metadata: { stateCode, billId: bill._id, address: addressInfo },
           });
 
-          // Send overdue email if user has email
           if (user.email) {
             const subject = "Overdue Waste Bill Payment Reminder";
             const html = `<p>Dear ${user.firstName},</p>
               <p>This is a reminder that your waste bill <b>(${bill.billNumber})</b> for <b>${addressInfo}</b> is overdue. Please pay as soon as possible to avoid penalties or service disruption.</p>
               <p>If you have already paid, please ignore this message.</p>
               <p>Thank you,<br/>Bin-Pay Team</p>`;
-            const text = `Dear ${user.firstName},\n\nThis is a reminder that your waste bill (${bill.billNumber}) for ${addressInfo} is overdue. Please pay as soon as possible to avoid penalties or service disruption.\n\nIf you have already paid, please ignore this message.\n\nThank you,\nBin-Pay Team`;
-            await sendEmail({
-              to: user.email,
-              subject,
-              html,
-              text,
-            });
+            const text = `Dear ${user.firstName},\n\nThis is a reminder that your waste bill (${bill.billNumber}) for ${addressInfo} is overdue.\n\nThank you,\nBin-Pay Team`;
+            await sendEmail({ to: user.email, subject, html, text });
           }
         }),
       );
@@ -125,10 +221,13 @@ router.post(
   },
 );
 
-// Get notifications for logged-in state admin
+// Get notifications for the logged-in STATE_ADMIN
+// FIX: removed the role check that blocked SUPER_ADMIN; also fixed to only
+// return notifications belonging to the requesting user (not all admins)
 router.get(
   "/notifications",
   authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user?.userId;
@@ -136,21 +235,44 @@ router.get(
         return res.status(401).json({ error: "Authentication required" });
       }
 
-      const user = await User.findById(userId);
-      if (!user || user.role !== "STATE_ADMIN") {
-        return res
-          .status(403)
-          .json({ error: "Only state admins can view these notifications" });
-      }
-
       const notifications = await Notification.find({ userId })
         .sort({ createdAt: -1 })
         .limit(100);
 
-      res.json({ notifications });
+      const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+      res.json({ notifications, unreadCount });
     } catch (error) {
-      console.error("Fetch state admin notifications error:", error);
+      console.error("Fetch admin notifications error:", error);
       res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  },
+);
+
+// Mark a single admin notification as read
+router.put(
+  "/notifications/:notificationId/read",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { notificationId } = req.params;
+      const userId = req.user?.userId;
+
+      const notification = await Notification.findOneAndUpdate(
+        { _id: notificationId, userId },
+        { isRead: true },
+        { new: true },
+      );
+
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+
+      res.json({ notification });
+    } catch (error) {
+      console.error("Mark notification read error:", error);
+      res.status(500).json({ error: "Failed to mark notification as read" });
     }
   },
 );
@@ -163,19 +285,14 @@ router.post(
     try {
       const userId = req.user?.userId;
       if (!userId) {
-        console.warn(`[NOTIFY BIN FULL] No userId in request.`);
         return res.status(401).json({ error: "Authentication required" });
       }
 
       const user = await User.findById(userId);
       if (!user || !user.stateCode) {
-        console.warn(
-          `[NOTIFY BIN FULL] User or state not found. userId: ${userId}`,
-        );
         return res.status(400).json({ error: "User or state not found" });
       }
 
-      // Find the user's registered address (most recent active BinRegistration)
       const binRegistration = await BinRegistration.findOne({
         userId: user._id,
         stateCode: user.stateCode,
@@ -183,9 +300,6 @@ router.post(
       }).sort({ createdAt: -1 });
 
       if (!binRegistration) {
-        console.warn(
-          `[NOTIFY BIN FULL] No active bin linked for userId: ${userId}, state: ${user.stateCode}`,
-        );
         return res
           .status(400)
           .json({ error: "Please link your bin before notifying your admin" });
@@ -199,9 +313,6 @@ router.post(
       });
 
       if (!stateAdmins.length) {
-        console.warn(
-          `[NOTIFY BIN FULL] No state admin found for state: ${user.stateCode}`,
-        );
         return res
           .status(404)
           .json({ error: "No state admin found for your state" });
@@ -209,7 +320,6 @@ router.post(
 
       const notificationMessage = `User ${user.firstName} ${user.lastName} (${user.email}) from address: ${addressInfo} reports their bin is full and requests waste pickup.`;
 
-      // Create notifications, send email and SMS to each admin
       await Promise.all(
         stateAdmins.map(async (admin) => {
           await Notification.create({
@@ -226,7 +336,6 @@ router.post(
             },
           });
 
-          // Send email
           if (admin.email) {
             await sendEmail({
               to: admin.email,
@@ -236,12 +345,8 @@ router.post(
             });
           }
 
-          // Send SMS
           if (admin.phone) {
-            await sendSMS({
-              to: admin.phone,
-              message: notificationMessage,
-            });
+            await sendSMS({ to: admin.phone, message: notificationMessage });
           }
         }),
       );
@@ -258,22 +363,17 @@ router.post(
 router.get("/states", async (req, res: Response) => {
   try {
     const { isActive } = req.query;
-
     const where: any = {};
     if (isActive !== undefined) {
       where.isActive = isActive === "true";
     }
-
     const states = await State.find(where).sort({ name: 1 });
-
-    // Get counts for each state
     const statesWithCounts = await Promise.all(
       states.map(async (state) => {
         const [billCount, paymentCount] = await Promise.all([
           Bill.countDocuments({ stateCode: state.code }),
           Payment.countDocuments({ stateCode: state.code }),
         ]);
-
         return {
           ...state.toObject(),
           _count: {
@@ -285,7 +385,6 @@ router.get("/states", async (req, res: Response) => {
         };
       }),
     );
-
     res.json({ states: statesWithCounts });
   } catch (error) {
     console.error("Get states error:", error);
@@ -297,25 +396,18 @@ router.get("/states", async (req, res: Response) => {
 router.get("/states/:stateCode", async (req, res: Response) => {
   try {
     const { stateCode } = req.params;
-
     const state = await State.findOne({ code: stateCode });
-
     if (!state) {
       return res.status(404).json({ error: "State not found" });
     }
-
     const [billCount, paymentCount] = await Promise.all([
       Bill.countDocuments({ stateCode: state.code }),
       Payment.countDocuments({ stateCode: state.code }),
     ]);
-
     res.json({
       state: {
         ...state.toObject(),
-        _count: {
-          bills: billCount,
-          payments: paymentCount,
-        },
+        _count: { bills: billCount, payments: paymentCount },
       },
     });
   } catch (error) {
@@ -332,9 +424,7 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const { stateCode } = req.params;
-
       const state = await State.findOne({ code: stateCode });
-
       if (!state) {
         return res.status(404).json({ error: "State not found" });
       }
@@ -371,7 +461,6 @@ router.get(
         }),
       ]);
 
-      // Get revenue totals
       const completedPayments = await Payment.find({
         stateCode: state.code,
         status: "SUCCESS",
@@ -392,7 +481,7 @@ router.get(
       );
 
       const collectionRate =
-        totalBills > 0 ? ((paidBills / totalBills) * 100).toFixed(2) : 0;
+        totalBills > 0 ? ((paidBills / totalBills) * 100).toFixed(2) : "0";
 
       res.json({
         stats: {
@@ -400,7 +489,7 @@ router.get(
           paidBills,
           pendingBills,
           overdueBills,
-          collectionRate: parseFloat(collectionRate as string),
+          collectionRate: parseFloat(collectionRate),
           totalRevenue,
           monthlyRevenue,
           totalUsers,
@@ -424,17 +513,12 @@ router.put(
     try {
       const stateCode = req.user!.stateCode;
       const { amount } = req.body;
-
       const state = await State.findOne({ code: stateCode });
-
       if (!state) {
         return res.status(404).json({ error: "State not found" });
       }
-
-      // Update the monthly bill amount
       state.monthlyBillAmount = amount;
       await state.save();
-
       res.json({
         message: "Monthly bill amount updated successfully",
         state: {
@@ -459,25 +543,18 @@ router.get(
     try {
       const { stateCode } = req.params;
       const { status, page = "1", limit = "20", search } = req.query;
-
       const state = await State.findOne({ code: stateCode });
-
       if (!state) {
         return res.status(404).json({ error: "State not found" });
       }
-
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
       const skip = (pageNum - 1) * limitNum;
-
       const where: any = { stateCode: state.code };
-      if (status) {
-        where.status = status;
-      }
+      if (status) where.status = status;
       if (search) {
         where.$or = [{ billNumber: new RegExp(search as string, "i") }];
       }
-
       const [bills, total] = await Promise.all([
         Bill.find(where)
           .populate("binRegistrationId")
@@ -487,7 +564,6 @@ router.get(
           .limit(limitNum),
         Bill.countDocuments(where),
       ]);
-
       res.json({
         bills,
         pagination: {
@@ -513,22 +589,15 @@ router.get(
     try {
       const { stateCode } = req.params;
       const { status, page = "1", limit = "20" } = req.query;
-
       const state = await State.findOne({ code: stateCode });
-
       if (!state) {
         return res.status(404).json({ error: "State not found" });
       }
-
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
       const skip = (pageNum - 1) * limitNum;
-
       const where: any = { stateCode: state.code };
-      if (status) {
-        where.status = status;
-      }
-
+      if (status) where.status = status;
       const [payments, total] = await Promise.all([
         Payment.find(where)
           .populate({
@@ -541,7 +610,6 @@ router.get(
           .limit(limitNum),
         Payment.countDocuments(where),
       ]);
-
       res.json({
         payments,
         pagination: {
@@ -567,24 +635,17 @@ router.get(
     try {
       const { stateCode } = req.params;
       const { page = "1", limit = "20", search } = req.query;
-
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
       const skip = (pageNum - 1) * limitNum;
-
       const state = await State.findOne({ code: stateCode });
-
       if (!state) {
         return res.status(404).json({ error: "State not found" });
       }
-
-      // Get user IDs who have bins in this state
       const userIds = await BinRegistration.distinct("userId", {
         stateCode: state.code,
       });
-
       const where: any = { _id: { $in: userIds }, role: "USER" };
-
       if (search) {
         where.$or = [
           { email: new RegExp(search as string, "i") },
@@ -593,7 +654,6 @@ router.get(
           { phone: new RegExp(search as string, "i") },
         ];
       }
-
       const [users, total] = await Promise.all([
         User.find(where)
           .select(
@@ -604,8 +664,6 @@ router.get(
           .limit(limitNum),
         User.countDocuments(where),
       ]);
-
-      // Get counts for each user
       const usersWithCounts = await Promise.all(
         users.map(async (user) => {
           const [billCount, paymentCount, binCount] = await Promise.all([
@@ -613,7 +671,6 @@ router.get(
             Payment.countDocuments({ userId: user._id }),
             BinRegistration.countDocuments({ userId: user._id }),
           ]);
-
           return {
             ...user.toObject(),
             _count: {
@@ -624,7 +681,6 @@ router.get(
           };
         }),
       );
-
       res.json({
         users: usersWithCounts,
         pagination: {
@@ -643,7 +699,6 @@ router.get(
 
 // SUPER ADMIN ROUTES
 
-// Get all state admins (SUPER_ADMIN only)
 router.get(
   "/super/state-admins",
   authenticate,
@@ -655,8 +710,6 @@ router.get(
           "email phone firstName lastName stateCode permissions isActive lastLogin createdAt",
         )
         .sort({ createdAt: -1 });
-
-      // Populate state information
       const stateAdminsWithStates = await Promise.all(
         stateAdmins.map(async (admin) => {
           const state = await State.findOne({ code: admin.stateCode });
@@ -672,7 +725,6 @@ router.get(
           };
         }),
       );
-
       res.json({ stateAdmins: stateAdminsWithStates });
     } catch (error) {
       console.error("Get state admins error:", error);
@@ -681,7 +733,6 @@ router.get(
   },
 );
 
-// Create state admin (SUPER_ADMIN only)
 router.post(
   "/super/state-admins",
   authenticate,
@@ -706,27 +757,17 @@ router.post(
         stateCode,
         permissions,
       } = req.body;
-
-      // Check if state exists
       const state = await State.findOne({ code: stateCode });
-
       if (!state) {
         return res.status(404).json({ error: "State not found" });
       }
-
-      // Check if user exists
-      const existingUser = await User.findOne({
-        $or: [{ email }, { phone }],
-      });
-
+      const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
       if (existingUser) {
         return res
           .status(400)
           .json({ error: "Email or phone already registered" });
       }
-
       const hashedPassword = await bcrypt.hash(password, 10);
-
       const stateAdmin = await User.create({
         email,
         phone,
@@ -739,7 +780,6 @@ router.post(
         isActive: true,
         isVerified: true,
       });
-
       res.status(201).json({
         message: "State admin created successfully",
         stateAdmin: {
@@ -761,7 +801,6 @@ router.post(
   },
 );
 
-// Toggle state admin status (SUPER_ADMIN only)
 router.patch(
   "/super/state-admins/:adminId/toggle-status",
   authenticate,
@@ -770,19 +809,12 @@ router.patch(
   async (req: AuthRequest, res) => {
     try {
       const { adminId } = req.params;
-
-      const admin = await User.findOne({
-        _id: adminId,
-        role: "STATE_ADMIN",
-      });
-
+      const admin = await User.findOne({ _id: adminId, role: "STATE_ADMIN" });
       if (!admin) {
         return res.status(404).json({ error: "State admin not found" });
       }
-
       admin.isActive = !admin.isActive;
       await admin.save();
-
       res.json({
         message: `State admin ${admin.isActive ? "activated" : "deactivated"} successfully`,
         stateAdmin: {
@@ -798,7 +830,6 @@ router.patch(
   },
 );
 
-// Update state admin details (SUPER_ADMIN only)
 router.put(
   "/super/state-admins/:adminId",
   authenticate,
@@ -814,17 +845,10 @@ router.put(
     try {
       const { adminId } = req.params;
       const { email, phone, firstName, lastName } = req.body;
-
-      const admin = await User.findOne({
-        _id: adminId,
-        role: "STATE_ADMIN",
-      });
-
+      const admin = await User.findOne({ _id: adminId, role: "STATE_ADMIN" });
       if (!admin) {
         return res.status(404).json({ error: "State admin not found" });
       }
-
-      // Check if email already exists for another user
       if (email && email !== admin.email) {
         const existingUser = await User.findOne({
           email,
@@ -834,15 +858,11 @@ router.put(
           return res.status(400).json({ error: "Email already in use" });
         }
       }
-
-      // Update fields if provided
       if (email) admin.email = email;
       if (phone) admin.phone = phone;
       if (firstName) admin.firstName = firstName;
       if (lastName) admin.lastName = lastName;
-
       await admin.save();
-
       res.json({
         message: "State admin updated successfully",
         stateAdmin: {
@@ -862,7 +882,6 @@ router.put(
   },
 );
 
-// Delete state admin (SUPER_ADMIN only)
 router.delete(
   "/super/state-admins/:adminId",
   authenticate,
@@ -871,23 +890,12 @@ router.delete(
   async (req: AuthRequest, res) => {
     try {
       const { adminId } = req.params;
-
-      const admin = await User.findOne({
-        _id: adminId,
-        role: "STATE_ADMIN",
-      });
-
+      const admin = await User.findOne({ _id: adminId, role: "STATE_ADMIN" });
       if (!admin) {
         return res.status(404).json({ error: "State admin not found" });
       }
-
-      // Instead of hard delete, we can soft delete by deactivating
-      // Or you can actually delete the user
       await User.deleteOne({ _id: adminId });
-
-      res.json({
-        message: "State admin deleted successfully",
-      });
+      res.json({ message: "State admin deleted successfully" });
     } catch (error) {
       console.error("Delete admin error:", error);
       res.status(500).json({ error: "Failed to delete state admin" });
@@ -895,7 +903,6 @@ router.delete(
   },
 );
 
-// Get platform-wide statistics (SUPER_ADMIN only)
 router.get(
   "/super/stats",
   authenticate,
@@ -936,14 +943,12 @@ router.get(
         Payment.countDocuments({ status: "SUCCESS" }),
       ]);
 
-      // Get revenue totals
       const completedPayments = await Payment.find({ status: "SUCCESS" });
       const totalRevenue = completedPayments.reduce(
         (sum, p) => sum + p.amount,
         0,
       );
 
-      // This month's revenue
       const monthlyPayments = await Payment.find({
         status: "SUCCESS",
         paidAt: { $gte: firstDayOfMonth },
@@ -953,7 +958,6 @@ router.get(
         0,
       );
 
-      // Last month's revenue
       const lastMonthPayments = await Payment.find({
         status: "SUCCESS",
         paidAt: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth },
@@ -963,7 +967,6 @@ router.get(
         0,
       );
 
-      // Calculate month-over-month growth percentage
       const revenueGrowth =
         lastMonthRevenue > 0
           ? parseFloat(
@@ -997,7 +1000,6 @@ router.get(
   },
 );
 
-// Get revenue data for all states (SUPER_ADMIN only)
 router.get(
   "/super/state-revenues",
   authenticate,
@@ -1010,11 +1012,8 @@ router.get(
         1,
       );
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-      // Get all active states
       const states = await State.find({ isActive: true });
 
-      // Get stats for each state
       const stateRevenueData = await Promise.all(
         states.map(async (state) => {
           const [
@@ -1042,7 +1041,6 @@ router.get(
             }),
           ]);
 
-          // Get revenue totals
           const completedPayments = await Payment.find({
             stateCode: state.code,
             status: "SUCCESS",
@@ -1061,7 +1059,6 @@ router.get(
             (sum, p) => sum + p.amount,
             0,
           );
-
           const collectionRate =
             totalBills > 0 ? (paidBills / totalBills) * 100 : 0;
 
@@ -1090,11 +1087,11 @@ router.get(
   },
 );
 
-// STATE ADMIN: Register a new address and generate bin ID
+// Register a new address (USER or ADMIN)
 router.post(
   "/addresses/register",
   authenticate,
-  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  authorize("USER", "STATE_ADMIN", "SUPER_ADMIN"),
   validate([
     body("lgaName").notEmpty().trim(),
     body("address").notEmpty().trim(),
@@ -1103,33 +1100,47 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const { lgaName, address, customerRef } = req.body;
-      const stateAdmin = req.user!;
+      const user = req.user!;
+      let stateCode = "";
+      let submitter: any;
 
-      // Get the state admin's state
-      const adminUser = await User.findById(stateAdmin.userId);
-      if (!adminUser || !adminUser.stateCode) {
-        return res
-          .status(400)
-          .json({ error: "State admin must be assigned to a state" });
+      if (user.role === "USER") {
+        const userDoc = await User.findById(user.userId);
+        if (!userDoc || !userDoc.stateCode) {
+          return res.status(400).json({
+            error:
+              "User must be assigned to a state. Please update your profile with your state.",
+          });
+        }
+        stateCode = userDoc.stateCode;
+        submitter = userDoc;
+      } else {
+        const adminUser = await User.findById(user.userId);
+        if (!adminUser || !adminUser.stateCode) {
+          return res
+            .status(400)
+            .json({ error: "State admin must be assigned to a state" });
+        }
+        stateCode = adminUser.stateCode;
+        submitter = adminUser;
       }
 
-      const state = await State.findOne({ code: adminUser.stateCode });
+      const state = await State.findOne({ code: stateCode });
       if (!state) {
         return res.status(404).json({ error: "State not found" });
       }
 
-      // Verify LGA exists in the state
       const lga = state.lgas.find((l) => l.name === lgaName);
       if (!lga) {
         return res.status(404).json({ error: "LGA not found in this state" });
       }
 
-      // Check if this address is already registered
+      const normalizedAddress = address.trim().toLowerCase();
+
       const existingAddress = await BinRegistration.findOne({
         stateCode: state.code,
-        address: address.trim().toLowerCase(),
+        address: normalizedAddress,
       });
-
       if (existingAddress) {
         return res.status(400).json({
           error: "This address is already registered",
@@ -1137,27 +1148,79 @@ router.post(
         });
       }
 
-      // Auto-generate unique bin ID based on state code
       const binId = await generateBinId(state.code);
 
-      // Create bin registration (without userId - will be set when user links it)
       const binRegistration = await BinRegistration.create({
         binId,
         stateCode: state.code,
         lgaName: lga.name,
-        address: address.trim(),
+        address: normalizedAddress,
         customerRef,
+        isActive: false,
+        status: BinRegistrationStatus.PENDING,
+        userId: user.userId,
+      });
+
+      // Notify all state admins for approval
+      const stateAdmins = await User.find({
+        role: "STATE_ADMIN",
+        stateCode: state.code,
         isActive: true,
       });
 
+      const notificationMessage = `New address registration submitted by ${submitter.firstName} ${submitter.lastName} (${submitter.email}) for approval: ${normalizedAddress}, ${lga.name}, ${state.code}`;
+
+      await Promise.all(
+        stateAdmins.map(async (admin) => {
+          await Notification.create({
+            userId: admin._id,
+            title: "New Address Registration Pending",
+            message: notificationMessage,
+            type: "ADDRESS_REGISTRATION",
+            isRead: false,
+            metadata: {
+              submittedBy: user.userId,
+              address: normalizedAddress,
+              lgaName: lga.name,
+              stateCode: state.code,
+              binId: binRegistration.binId,
+              // FIX: store the MongoDB _id so the notification-tab can pass it
+              // to approveAddress/rejectAddress which expect the document _id
+              addressId: binRegistration._id.toString(),
+            },
+          });
+
+          if (admin.email) {
+            await sendEmail({
+              to: admin.email,
+              subject: "New Address Registration Pending Approval",
+              html: `<p>Dear ${admin.firstName},</p>
+                  <p>A new address registration has been submitted for approval:</p>
+                  <ul>
+                    <li><b>Address:</b> ${normalizedAddress}</li>
+                    <li><b>LGA:</b> ${lga.name}</li>
+                    <li><b>State:</b> ${state.name} (${state.code})</li>
+                    <li><b>Submitted by:</b> ${submitter.firstName} ${submitter.lastName} (${submitter.email})</li>
+                    <li><b>Bin ID:</b> ${binRegistration.binId}</li>
+                  </ul>
+                  <p>Please review and approve/reject this address in your admin dashboard.</p>
+                  <p>Thank you,<br/>Bin-Pay Team</p>`,
+              text: `New address registration from ${submitter.firstName} ${submitter.lastName}:\nAddress: ${normalizedAddress}\nLGA: ${lga.name}\nBin ID: ${binRegistration.binId}`,
+            });
+          }
+        }),
+      );
+
       res.status(201).json({
-        message: "Address registered successfully with auto-generated bin ID",
+        message:
+          "Address registration submitted for approval. You will be notified once reviewed.",
         binRegistration: {
           binId: binRegistration.binId,
           stateCode: binRegistration.stateCode,
           lgaName: binRegistration.lgaName,
           address: binRegistration.address,
           customerRef: binRegistration.customerRef,
+          status: binRegistration.status,
           isActive: binRegistration.isActive,
           registeredAt: binRegistration.registeredAt,
         },
@@ -1165,6 +1228,30 @@ router.post(
     } catch (error) {
       console.error("Address registration error:", error);
       res.status(500).json({ error: "Failed to register address" });
+    }
+  },
+);
+
+// Look up a single address by its binId string — used as a fallback for old
+// notifications that don't carry addressId in their metadata
+router.get(
+  "/addresses/by-bin/:binId",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  async (req: AuthRequest, res) => {
+    try {
+      const { binId } = req.params;
+      const address = await BinRegistration.findOne({ binId }).populate(
+        "userId",
+        "firstName lastName email phone",
+      );
+      if (!address) {
+        return res.status(404).json({ error: "Address not found" });
+      }
+      res.json({ address });
+    } catch (error) {
+      console.error("Get address by binId error:", error);
+      res.status(500).json({ error: "Failed to get address" });
     }
   },
 );
@@ -1177,18 +1264,24 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const stateAdmin = req.user!;
+      let stateCode: string | undefined;
 
-      // Get the state admin's state
-      const adminUser = await User.findById(stateAdmin.userId);
-      if (!adminUser || !adminUser.stateCode) {
-        return res
-          .status(400)
-          .json({ error: "State admin must be assigned to a state" });
+      if (stateAdmin.role === "SUPER_ADMIN") {
+        stateCode = req.query.stateCode as string | undefined;
+      } else {
+        const adminUser = await User.findById(stateAdmin.userId);
+        if (!adminUser || !adminUser.stateCode) {
+          return res
+            .status(400)
+            .json({ error: "State admin must be assigned to a state" });
+        }
+        stateCode = adminUser.stateCode;
       }
 
-      const addresses = await BinRegistration.find({
-        stateCode: adminUser.stateCode,
-      })
+      const query: any = {};
+      if (stateCode) query.stateCode = stateCode;
+
+      const addresses = await BinRegistration.find(query)
         .populate("userId", "firstName lastName email phone")
         .sort({ createdAt: -1 });
 
@@ -1224,7 +1317,6 @@ router.put(
           .json({ error: "State admin must be assigned to a state" });
       }
 
-      // Find the address and verify it belongs to the admin's state
       const binRegistration = await BinRegistration.findById(addressId);
       if (!binRegistration) {
         return res.status(404).json({ error: "Address not found" });
@@ -1236,8 +1328,8 @@ router.put(
           .json({ error: "Cannot update address from another state" });
       }
 
-      // Update the address
-      if (address !== undefined) binRegistration.address = address;
+      if (address !== undefined)
+        binRegistration.address = address.trim().toLowerCase();
       if (lgaName !== undefined) binRegistration.lgaName = lgaName;
       if (customerRef !== undefined) binRegistration.customerRef = customerRef;
 
@@ -1268,7 +1360,6 @@ router.patch(
   async (req: AuthRequest, res) => {
     try {
       const { addressId } = req.params;
-
       const stateAdmin = req.user!;
       const adminUser = await User.findById(stateAdmin.userId);
       if (!adminUser || !adminUser.stateCode) {
@@ -1277,7 +1368,6 @@ router.patch(
           .json({ error: "State admin must be assigned to a state" });
       }
 
-      // Find the address and verify it belongs to the admin's state
       const binRegistration = await BinRegistration.findById(addressId);
       if (!binRegistration) {
         return res.status(404).json({ error: "Address not found" });
@@ -1289,7 +1379,6 @@ router.patch(
           .json({ error: "Cannot modify address from another state" });
       }
 
-      // Toggle the active status
       binRegistration.isActive = !binRegistration.isActive;
       await binRegistration.save();
 

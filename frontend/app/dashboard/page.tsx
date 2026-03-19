@@ -44,13 +44,16 @@ import {
   Eye,
   Loader2,
   LogOut,
+  MapPin,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { authApi, billsApi, paymentsApi } from "@/lib/api";
+import { authApi, billsApi, paymentsApi, adminApi } from "@/lib/api";
 import { useToast, toast } from "@/hooks/use-toast";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { toast: showToast } = useToast();
+
   const [user, setUser] = useState<any>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("pay-bill");
@@ -59,25 +62,13 @@ export default function DashboardPage() {
     binId: "",
     customerRef: "",
   });
-
-  // Add bill details state for when a bill is found
-  const [foundBill, setFoundBill] = useState<{
-    id: string;
-    binId: string;
-    address: string;
-    amount: number;
-    dueDate: string;
-    status: string;
-    zone: string;
-  } | null>(null);
-
+  const [foundBill, setFoundBill] = useState<any>(null);
   const [recentPayments, setRecentPayments] = useState<any[]>([]);
   const [upcomingBills, setUpcomingBills] = useState<any[]>([]);
   const [isLoadingPayments, setIsLoadingPayments] = useState(false);
   const [isLoadingBills, setIsLoadingBills] = useState(false);
   const [error, setError] = useState("");
 
-  // Dashboard stats
   const [stats, setStats] = useState({
     totalPaid: 0,
     activeBins: 0,
@@ -86,7 +77,6 @@ export default function DashboardPage() {
   });
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
-  // Address search states
   const [showAddressSearch, setShowAddressSearch] = useState(false);
   const [addressSearch, setAddressSearch] = useState({
     address: "",
@@ -98,11 +88,15 @@ export default function DashboardPage() {
   const [userBins, setUserBins] = useState<any[]>([]);
   const [isLoadingBins, setIsLoadingBins] = useState(false);
 
-  // Notifications state
+  // FIX: track whether the user has searched so we can show register form
+  const [hasSearched, setHasSearched] = useState(false);
+  const [isRegisteringAddress, setIsRegisteringAddress] = useState(false);
+  const [registeredBinId, setRegisteredBinId] = useState<string | null>(null);
+
+  // Notifications
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // State billing information
   const [stateBillingInfo, setStateBillingInfo] = useState<{
     monthlyBillAmount: number;
     stateCode: string;
@@ -113,7 +107,6 @@ export default function DashboardPage() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // Check if we have a token first
         const token =
           typeof window !== "undefined"
             ? localStorage.getItem("accessToken")
@@ -130,22 +123,25 @@ export default function DashboardPage() {
         }
         setUser(currentUser);
 
-        // Load user's data
-        await loadStats();
-        await loadPaymentHistory();
-        await loadUpcomingBills();
-        await loadUserBins();
-        await loadNotifications();
-        // Check if user is linked to any bin
-        const bins = await billsApi.getUserBins();
-        if (!bins.bins || bins.bins.length === 0) {
-          setError(
-            "You are not linked to any bin. Please register your address and link a bin to use all features.",
-          );
-        }
+        await Promise.all([
+          loadStats(),
+          loadPaymentHistory(),
+          loadUpcomingBills(),
+          loadUserBins(),
+          loadNotifications(),
+        ]);
+
+        // Warn if no bins linked yet
+        try {
+          const bins = await billsApi.getUserBins();
+          if (!bins.bins || bins.bins.length === 0) {
+            setError(
+              "You are not linked to any bin. Go to Profile to register or link your address.",
+            );
+          }
+        } catch (_) {}
       } catch (err: any) {
         console.error("Authentication error:", err);
-        // Clear invalid tokens
         if (typeof window !== "undefined") {
           localStorage.removeItem("accessToken");
           localStorage.removeItem("refreshToken");
@@ -162,12 +158,10 @@ export default function DashboardPage() {
   const loadPaymentHistory = async () => {
     try {
       setIsLoadingPayments(true);
-      const paymentsResponse = await paymentsApi.getAll();
-      const paymentsArr = Array.isArray(paymentsResponse)
-        ? paymentsResponse
-        : paymentsResponse.payments || [];
-      setRecentPayments(paymentsArr.slice(0, 5)); // Show recent 5
-    } catch (err: any) {
+      const response = await paymentsApi.getAll();
+      const arr = Array.isArray(response) ? response : response.payments || [];
+      setRecentPayments(arr.slice(0, 5));
+    } catch (err) {
       console.error("Failed to load payments:", err);
     } finally {
       setIsLoadingPayments(false);
@@ -177,13 +171,12 @@ export default function DashboardPage() {
   const loadUpcomingBills = async () => {
     try {
       setIsLoadingBills(true);
-      const billsResponse = await billsApi.getAll();
-      const billsArr = Array.isArray(billsResponse)
-        ? billsResponse
-        : billsResponse.bills || [];
-      const pending = billsArr.filter((b: any) => b.status === "pending");
-      setUpcomingBills(pending.slice(0, 3)); // Show next 3 bills
-    } catch (err: any) {
+      const response = await billsApi.getAll();
+      const arr = Array.isArray(response) ? response : response.bills || [];
+      setUpcomingBills(
+        arr.filter((b: any) => b.status === "pending").slice(0, 3),
+      );
+    } catch (err) {
       console.error("Failed to load bills:", err);
     } finally {
       setIsLoadingBills(false);
@@ -195,18 +188,15 @@ export default function DashboardPage() {
       setIsLoadingBins(true);
       const response = await billsApi.getUserBins();
       setUserBins(response.bins || []);
-
-      // Load state billing info from the first bin's state
       if (response.bins && response.bins.length > 0) {
-        const stateCode = response.bins[0].stateCode;
         try {
-          const billingInfo = await billsApi.getStateBilling(stateCode);
+          const billingInfo = await billsApi.getStateBilling(
+            response.bins[0].stateCode,
+          );
           setStateBillingInfo(billingInfo);
-        } catch (err) {
-          console.error("Failed to load state billing info:", err);
-        }
+        } catch (_) {}
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to load user bins:", err);
     } finally {
       setIsLoadingBins(false);
@@ -218,19 +208,22 @@ export default function DashboardPage() {
       setIsLoadingStats(true);
       const response = await billsApi.getUserStats();
       setStats(response.stats);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to load stats:", err);
     } finally {
       setIsLoadingStats(false);
     }
   };
 
+  // FIX: use billsApi.getNotifications() which hits /bills/notifications
+  // (the user notification endpoint, not the admin one)
   const loadNotifications = async () => {
     try {
       const response = await billsApi.getNotifications();
-      setNotifications(response.notifications || []);
-      setUnreadCount(response.unreadCount || 0);
-    } catch (err: any) {
+      const notifs = response.notifications || [];
+      setNotifications(notifs);
+      setUnreadCount(notifs.filter((n: any) => !n.isRead).length);
+    } catch (err) {
       console.error("Failed to load notifications:", err);
     }
   };
@@ -240,19 +233,17 @@ export default function DashboardPage() {
       setError("Please enter an address or select a state");
       return;
     }
-
     try {
       setError("");
       setIsSearching(true);
+      setHasSearched(false);
       const response = await billsApi.searchAddress(addressSearch);
       setSearchResults(response.results || []);
-
-      if (response.results.length === 0) {
-        setError("No addresses found. Please refine your search.");
-      }
+      setHasSearched(true);
     } catch (err: any) {
       setError(err.message || "Failed to search addresses");
       setSearchResults([]);
+      setHasSearched(true);
     } finally {
       setIsSearching(false);
     }
@@ -264,157 +255,123 @@ export default function DashboardPage() {
       await billsApi.linkBin(binId);
       setShowAddressSearch(false);
       setSearchResults([]);
+      setHasSearched(false);
       setAddressSearch({ address: "", stateCode: "", lgaName: "" });
-      await loadUserBins(); // Reload bins
-      setError("");
-      alert(
-        "Bin linked successfully! You can now use all features including Notify State Admin.",
-      );
+      await loadUserBins();
+      showToast({ title: "Bin linked successfully!" });
     } catch (err: any) {
-      // Show more detailed error messages for common backend errors
       let errorMsg = err?.message || "Failed to link bin";
-      if (err?.data?.details && Array.isArray(err.data.details)) {
-        // Validation errors from backend
-        errorMsg = err.data.details.map((d: any) => d.msg).join("; ");
-      } else if (err?.data?.error) {
-        // Specific backend error
-        errorMsg = err.data.error;
-      }
+      if (err?.data?.error) errorMsg = err.data.error;
       setError(errorMsg);
     }
   };
 
   const handleUnlinkBin = async (binId: string) => {
-    if (!confirm("Are you sure you want to unlink this bin?")) {
-      return;
-    }
-
+    if (!confirm("Are you sure you want to unlink this bin?")) return;
     try {
       setError("");
       await billsApi.unlinkBin(binId);
-      await loadUserBins(); // Reload bins
-      alert("Bin unlinked successfully!");
+      await loadUserBins();
+      showToast({ title: "Bin unlinked successfully" });
     } catch (err: any) {
       setError(err.message || "Failed to unlink bin");
     }
   };
 
-  if (isInitialLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-green-600" />
-          <p className="text-gray-600">Loading your dashboard...</p>
-        </div>
-      </div>
-    );
-  }
+  // FIX: address registration now a dedicated handler that calls billsApi.registerAddress
+  // It no longer requires stateCode from the form — the backend reads it from the JWT token
+  const handleRegisterAddress = async () => {
+    const { address, lgaName } = addressSearch;
+    if (!address || !lgaName) {
+      setError("Please enter both an address and select an LGA to register.");
+      return;
+    }
+    try {
+      setIsRegisteringAddress(true);
+      setError("");
+      const response = await billsApi.registerAddress({
+        address,
+        lgaName,
+        stateCode: addressSearch.stateCode, // optional — backend uses JWT stateCode
+      });
+      setRegisteredBinId(response.binRegistration?.binId || null);
+      showToast({
+        title: "Address submitted for approval",
+        description:
+          "Your state admin will review and approve your address. You will be notified.",
+      });
+      setShowAddressSearch(false);
+      setHasSearched(false);
+      setAddressSearch({ address: "", stateCode: "", lgaName: "" });
+      setSearchResults([]);
+      // Reload notifications so the user can see any immediate feedback
+      await loadNotifications();
+    } catch (err: any) {
+      setError(err?.message || "Failed to register address");
+    } finally {
+      setIsRegisteringAddress(false);
+    }
+  };
+
+  // FIX: logout now removes "accessToken" (the key used during login/register)
+  // Previously it removed "token" which was never set, so logout had no effect
+  const handleLogout = () => {
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+    router.push("/login");
+  };
 
   const handleBillLookup = async () => {
     if (!billLookup.binId || !billLookup.state) {
       setFoundBill(null);
       return;
     }
-
     try {
       setError("");
-      // Lookup bill by BIN ID
       const response = await billsApi.getByBinId(billLookup.binId);
-
-      // Check if we got bin registration and current bill
       if (!response.binRegistration) {
         setError("Bin ID not found");
         setFoundBill(null);
         return;
       }
-
       if (!response.currentBill) {
-        try {
-          setError("");
-          const result = await billsApi.linkBin(billLookup.binId);
-          setShowAddressSearch(false);
-          setSearchResults([]);
-          setAddressSearch({ address: "", stateCode: "", lgaName: "" });
-          await loadUserBins(); // Reload bins
-          setError("");
-          // Show feedback based on backend validation
-          if (result && result.message) {
-            alert(result.message);
-          } else {
-            alert(
-              "Bin linked successfully! You can now use all features including Notify State Admin.",
-            );
-          }
-        } catch (err: any) {
-          // Show more detailed error messages for common backend errors
-          let errorMsg = err?.message || "Failed to link bin";
-          if (err?.data?.details && Array.isArray(err.data.details)) {
-            // Validation errors from backend
-            errorMsg = err.data.details.map((d: any) => d.msg).join("; ");
-          } else if (err?.data?.error) {
-            // Specific backend error
-            errorMsg = err.data.error;
-          }
-          setError(errorMsg);
-        }
+        setError(
+          "No active bill found for this bin. Try linking it to your account.",
+        );
         setFoundBill(null);
+        return;
       }
+      setFoundBill(response.currentBill);
     } catch (err: any) {
       setError(err?.message || "Failed to lookup bill");
       setFoundBill(null);
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    router.push("/login");
-  };
-
   const downloadBillPDF = async (billId: string, binId: string) => {
     try {
       const token = localStorage.getItem("accessToken");
       if (!token) {
-        toast({
+        showToast({
           title: "Error",
           description: "Please log in again",
           variant: "destructive",
         });
         return;
       }
-
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"}/bills/${billId}/download`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        },
+        { method: "GET", headers: { Authorization: `Bearer ${token}` } },
       );
-
-      if (response.status === 401) {
-        toast({
-          title: "Error",
-          description: "Session expired. Please log in again",
-          variant: "destructive",
-        });
-        router.push("/login");
-        return;
-      }
-
       if (!response.ok) {
-        const error = await response
-          .json()
-          .catch(() => ({ error: "Failed to download bill" }));
-        toast({
+        showToast({
           title: "Error",
-          description: error.error || "Failed to download bill",
+          description: "Failed to download bill",
           variant: "destructive",
         });
         return;
       }
-
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -424,11 +381,9 @@ export default function DashboardPage() {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-
-      toast({ title: "Success", description: "Bill downloaded successfully" });
-    } catch (err: any) {
-      console.error("Failed to download bill:", err);
-      toast({
+      showToast({ title: "Bill downloaded successfully" });
+    } catch (err) {
+      showToast({
         title: "Error",
         description: "Failed to download bill",
         variant: "destructive",
@@ -443,13 +398,7 @@ export default function DashboardPage() {
   ) => {
     try {
       setError("");
-      // Initialize payment
-      const response = await paymentsApi.initialize({
-        billId,
-        method,
-      });
-
-      // Redirect to Paystack payment page
+      const response = await paymentsApi.initialize({ billId, method });
       if (response.paystack?.authorizationUrl) {
         window.location.href = response.paystack.authorizationUrl;
       } else {
@@ -457,9 +406,19 @@ export default function DashboardPage() {
       }
     } catch (err: any) {
       setError(err.message || "Failed to initialize payment");
-      console.error("Payment initialization error:", err);
     }
   };
+
+  if (isInitialLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-green-600" />
+          <p className="text-gray-600">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-yellow-50">
@@ -468,43 +427,25 @@ export default function DashboardPage() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <Logo href="/" size="sm" />
-              </div>
-              <nav className="hidden md:flex items-center space-x-6">
-                <button
-                  onClick={() => setActiveTab("pay-bill")}
-                  className={`px-3 py-2 rounded-md text-sm font-medium ${
-                    activeTab === "pay-bill"
-                      ? "bg-green-100 text-green-700"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                >
-                  Pay Bills
-                </button>
-                <button
-                  onClick={() => setActiveTab("history")}
-                  className={`px-3 py-2 rounded-md text-sm font-medium ${
-                    activeTab === "history"
-                      ? "bg-green-100 text-green-700"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                >
-                  History
-                </button>
-                <button
-                  onClick={() => setActiveTab("profile")}
-                  className={`px-3 py-2 rounded-md text-sm font-medium ${
-                    activeTab === "profile"
-                      ? "bg-green-100 text-green-700"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                >
-                  Profile
-                </button>
+              <Logo href="/" size="sm" />
+              <nav className="hidden md:flex items-center space-x-2">
+                {["pay-bill", "history", "my-bins", "profile"].map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-3 py-2 rounded-md text-sm font-medium capitalize ${
+                      activeTab === tab
+                        ? "bg-green-100 text-green-700"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                  >
+                    {tab.replace("-", " ")}
+                  </button>
+                ))}
               </nav>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Notification bell with unread badge */}
               <Button
                 variant="outline"
                 size="sm"
@@ -526,27 +467,24 @@ export default function DashboardPage() {
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm">
                     <User className="w-4 h-4 mr-2" />
-                    {user?.name || "User"}
+                    {user?.firstName || "User"}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuLabel>My Account</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setActiveTab("profile")}>
-                    <User className="w-4 h-4 mr-2" />
-                    Profile
+                    <User className="w-4 h-4 mr-2" /> Profile
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("my-bins")}>
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    My Bins
+                    <Trash2 className="w-4 h-4 mr-2" /> My Bins
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={handleLogout}
                     className="text-red-600 focus:text-red-600"
                   >
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Logout
+                    <LogOut className="w-4 h-4 mr-2" /> Logout
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -556,10 +494,10 @@ export default function DashboardPage() {
       </header>
 
       <div className="container mx-auto px-2 sm:px-4 py-8 max-w-7xl">
-        {/* Welcome Section */}
+        {/* Welcome */}
         <div className="mb-8 text-center">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-primary mb-2 tracking-tight drop-shadow-md">
-            Welcome back, {user?.name || "User"}!
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-primary mb-2 tracking-tight">
+            Welcome back, {user?.firstName || "User"}!
           </h1>
           <p className="text-lg text-gray-700 max-w-2xl mx-auto">
             Manage your{" "}
@@ -569,13 +507,33 @@ export default function DashboardPage() {
             across Nigeria
           </p>
         </div>
+
         {error && (
           <Alert variant="destructive" className="mb-6">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        {/* Monthly Bill Amount Display */}
+
+        {/* Registered bin ID success banner */}
+        {registeredBinId && (
+          <Alert className="mb-6 border-green-600 bg-green-50">
+            <CheckCircle className="h-4 w-4 text-green-600" />
+            <AlertDescription className="text-green-900">
+              <span className="font-semibold">Address submitted!</span> Your Bin
+              ID is{" "}
+              <span className="font-mono font-bold">{registeredBinId}</span>.
+              You will be notified once approved by your state admin.{" "}
+              <button
+                className="underline ml-2"
+                onClick={() => setRegisteredBinId(null)}
+              >
+                Dismiss
+              </button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {stateBillingInfo && (
           <Alert className="mb-6 border-green-600 bg-green-50">
             <CreditCard className="h-4 w-4 text-green-600" />
@@ -588,63 +546,53 @@ export default function DashboardPage() {
             </AlertDescription>
           </Alert>
         )}
-        {/* Bin Full Notification Button */}
+
+        {/* Bin Full Alert Button */}
         <Alert className="mb-6 border-yellow-600 bg-yellow-50">
           <AlertDescription className="text-yellow-900">
-            <div className="flex justify-center mb-8">
+            <div className="flex justify-center">
               <Button
-                className="bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 text-white font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 hover:from-green-500 hover:to-red-600 transition-all duration-200 text-lg flex items-center gap-2"
+                className="bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 text-white font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 transition-all duration-200 text-lg flex items-center gap-2"
                 onClick={async () => {
                   setError("");
                   try {
-                    await import("@/lib/api").then(({ adminApi }) =>
-                      adminApi.notifyBinFull(),
-                    );
-                    window.alert(
-                      "Your state admin has been notified that your bin is full!",
-                    );
+                    await adminApi.notifyBinFull();
+                    showToast({
+                      title: "Admin notified",
+                      description:
+                        "Your state admin has been notified that your bin is full.",
+                    });
                   } catch (err: any) {
-                    // Show more detailed error messages for common backend errors
-                    let errorMsg =
+                    let msg =
+                      err?.data?.error ||
                       err?.message ||
-                      "Failed to notify state admin. Please try again.";
-                    if (err?.data?.details && Array.isArray(err.data.details)) {
-                      errorMsg = err.data.details
-                        .map((d: any) => d.msg)
-                        .join("; ");
-                    } else if (err?.data?.error) {
-                      errorMsg = err.data.error;
-                    } else if (err?.message?.toLowerCase().includes("bin")) {
-                      errorMsg =
-                        "Please link your bin before notifying your admin.";
-                    }
-                    setError(errorMsg);
+                      "Failed to notify state admin.";
+                    setError(msg);
                   }
                 }}
-                aria-label="Notify State Admin Bin Full"
               >
-                <span role="img" aria-label="bin full">
-                  🗑️
-                </span>
+                <span>🗑️</span>
                 Bin Full? Notify State Admin
               </Button>
             </div>
           </AlertDescription>
         </Alert>
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+
+        {/* Quick Stats — 2x2 on mobile, 4 across on desktop */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-10">
+          {/* Total Paid */}
           <Card className="bg-gradient-to-br from-green-100/80 to-green-50 border-green-200 shadow-md">
-            <CardContent className="p-6 flex items-center gap-4">
-              <div className="w-14 h-14 bg-green-200 rounded-xl flex items-center justify-center shadow">
-                <CreditCard className="w-7 h-7 text-green-700" />
+            <CardContent className="p-3 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+              <div className="w-9 h-9 sm:w-14 sm:h-14 bg-green-200 rounded-xl flex items-center justify-center shadow shrink-0">
+                <CreditCard className="w-5 h-5 sm:w-7 sm:h-7 text-green-700" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-green-800">
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-semibold text-green-800">
                   Total Paid
                 </p>
-                <p className="text-2xl font-extrabold text-green-900">
+                <p className="text-base sm:text-2xl font-extrabold text-green-900 truncate">
                   {isLoadingStats ? (
-                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     `₦${stats.totalPaid.toLocaleString()}`
                   )}
@@ -652,80 +600,86 @@ export default function DashboardPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Active Bins */}
           <Card className="bg-gradient-to-br from-blue-100/80 to-blue-50 border-blue-200 shadow-md">
-            <CardContent className="p-6 flex items-center gap-4">
-              <div className="w-14 h-14 bg-blue-200 rounded-xl flex items-center justify-center shadow">
-                <Trash2 className="w-7 h-7 text-blue-700" />
+            <CardContent className="p-3 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+              <div className="w-9 h-9 sm:w-14 sm:h-14 bg-blue-200 rounded-xl flex items-center justify-center shadow shrink-0">
+                <Trash2 className="w-5 h-5 sm:w-7 sm:h-7 text-blue-700" />
               </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-blue-800">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs sm:text-sm font-semibold text-blue-800">
                   Active Bins
                 </p>
-                <p className="text-2xl font-extrabold text-blue-900">
+                <p className="text-base sm:text-2xl font-extrabold text-blue-900">
                   {isLoadingBins ? (
-                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     userBins.length
                   )}
                 </p>
+                <button
+                  onClick={() => setActiveTab("my-bins")}
+                  className="text-xs text-blue-600 font-medium mt-0.5 hover:underline"
+                >
+                  View →
+                </button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setActiveTab("my-bins")}
-                className="text-blue-700 hover:text-blue-900 font-semibold"
-              >
-                View →
-              </Button>
             </CardContent>
           </Card>
+
+          {/* Due Soon */}
           <Card className="bg-gradient-to-br from-orange-100/80 to-yellow-50 border-orange-200 shadow-md">
-            <CardContent className="p-6 flex items-center gap-4">
-              <div className="w-14 h-14 bg-orange-200 rounded-xl flex items-center justify-center shadow">
-                <AlertCircle className="w-7 h-7 text-orange-700" />
+            <CardContent className="p-3 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+              <div className="w-9 h-9 sm:w-14 sm:h-14 bg-orange-200 rounded-xl flex items-center justify-center shadow shrink-0">
+                <AlertCircle className="w-5 h-5 sm:w-7 sm:h-7 text-orange-700" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-orange-800">
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-semibold text-orange-800">
                   Due Soon
                 </p>
                 {isLoadingBills ? (
-                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <Loader2 className="w-5 h-5 animate-spin" />
                 ) : upcomingBills.length > 0 ? (
                   <>
-                    <p className="text-2xl font-extrabold text-orange-900">
+                    <p className="text-base sm:text-2xl font-extrabold text-orange-900 truncate">
                       ₦{upcomingBills[0].amount.toLocaleString()}
                     </p>
-                    <p className="text-xs text-orange-700 mt-1">
+                    <p className="text-xs text-orange-700 mt-0.5">
                       Due{" "}
                       {new Date(upcomingBills[0].dueDate).toLocaleDateString()}
                     </p>
                   </>
                 ) : (
-                  <p className="text-2xl font-extrabold text-orange-900">₦0</p>
+                  <p className="text-base sm:text-2xl font-extrabold text-orange-900">
+                    ₦0
+                  </p>
                 )}
               </div>
             </CardContent>
           </Card>
+
+          {/* This Month */}
           <Card className="bg-gradient-to-br from-purple-100/80 to-pink-50 border-purple-200 shadow-md">
-            <CardContent className="p-6 flex items-center gap-4">
-              <div className="w-14 h-14 bg-purple-200 rounded-xl flex items-center justify-center shadow">
-                <CheckCircle className="w-7 h-7 text-purple-700" />
+            <CardContent className="p-3 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+              <div className="w-9 h-9 sm:w-14 sm:h-14 bg-purple-200 rounded-xl flex items-center justify-center shadow shrink-0">
+                <CheckCircle className="w-5 h-5 sm:w-7 sm:h-7 text-purple-700" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-purple-800">
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-semibold text-purple-800">
                   This Month
                 </p>
-                <p className="text-2xl font-extrabold text-purple-900">
+                <p className="text-base sm:text-2xl font-extrabold text-purple-900 truncate">
                   {isLoadingPayments ? (
-                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     `₦${recentPayments
                       .filter((p) => {
-                        const paymentDate = new Date(p.paidAt || p.createdAt);
+                        const d = new Date(p.paidAt || p.createdAt);
                         const now = new Date();
                         return (
-                          paymentDate.getMonth() === now.getMonth() &&
-                          paymentDate.getFullYear() === now.getFullYear()
+                          d.getMonth() === now.getMonth() &&
+                          d.getFullYear() === now.getFullYear()
                         );
                       })
                       .reduce((sum, p) => sum + p.amount, 0)
@@ -736,10 +690,10 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         </div>
-        {/* Main Content */}
+
+        {/* ─── Pay Bill Tab ─── */}
         {activeTab === "pay-bill" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Bill Lookup */}
             <div className="lg:col-span-2">
               <Card>
                 <CardHeader>
@@ -748,7 +702,7 @@ export default function DashboardPage() {
                     Pay Your Bill
                   </CardTitle>
                   <CardDescription>
-                    Enter your details to lookup and pay your waste bin bill
+                    Enter your bin ID to lookup and pay your bill
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -756,8 +710,8 @@ export default function DashboardPage() {
                     <Label htmlFor="state">State</Label>
                     <Select
                       value={billLookup.state}
-                      onValueChange={(value) =>
-                        setBillLookup((prev) => ({ ...prev, state: value }))
+                      onValueChange={(v) =>
+                        setBillLookup((p) => ({ ...p, state: v }))
                       }
                     >
                       <SelectTrigger>
@@ -769,50 +723,27 @@ export default function DashboardPage() {
                         <SelectItem value="rivers">Rivers</SelectItem>
                         <SelectItem value="anambra">Anambra</SelectItem>
                         <SelectItem value="kano">Kano</SelectItem>
+                        <SelectItem value="enugu">Enugu</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div>
                     <Label htmlFor="binId">Waste Bin ID</Label>
                     <Input
                       id="binId"
                       value={billLookup.binId}
                       onChange={(e) =>
-                        setBillLookup((prev) => ({
-                          ...prev,
-                          binId: e.target.value,
-                        }))
+                        setBillLookup((p) => ({ ...p, binId: e.target.value }))
                       }
                       placeholder="e.g., LG001234"
                     />
                   </div>
-
-                  <div>
-                    <Label htmlFor="customerRef">
-                      Customer Reference (Optional)
-                    </Label>
-                    <Input
-                      id="customerRef"
-                      value={billLookup.customerRef}
-                      onChange={(e) =>
-                        setBillLookup((prev) => ({
-                          ...prev,
-                          customerRef: e.target.value,
-                        }))
-                      }
-                      placeholder="Your customer reference number"
-                    />
-                  </div>
-
                   <Button className="w-full" onClick={handleBillLookup}>
-                    <Search className="w-4 h-4 mr-2" />
-                    Lookup Bill
+                    <Search className="w-4 h-4 mr-2" /> Lookup Bill
                   </Button>
                 </CardContent>
               </Card>
 
-              {/* Bill Lookup Results */}
               {foundBill && (
                 <Card className="mt-4">
                   <CardHeader>
@@ -821,150 +752,67 @@ export default function DashboardPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label className="text-sm font-medium text-gray-600">
-                          Bin ID
-                        </Label>
+                        <Label className="text-sm text-gray-600">Bin ID</Label>
                         <p className="font-semibold text-blue-600">
                           {foundBill.binId}
                         </p>
                       </div>
                       <div>
-                        <Label className="text-sm font-medium text-gray-600">
+                        <Label className="text-sm text-gray-600">
                           Amount Due
                         </Label>
                         <p className="font-semibold text-lg">
-                          ₦{foundBill.amount.toLocaleString()}
+                          ₦{foundBill.amount?.toLocaleString()}
                         </p>
                       </div>
                     </div>
-
-                    <div>
-                      <Label className="text-sm font-medium text-gray-600">
-                        Service Address
-                      </Label>
-                      <p className="font-medium">{foundBill.address}</p>
-                      <Badge variant="outline" className="mt-1">
-                        {foundBill.zone}
-                      </Badge>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-sm font-medium text-gray-600">
-                          Due Date
-                        </Label>
-                        <p>{foundBill.dueDate}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-600">
-                          Status
-                        </Label>
-                        <Badge
-                          variant={
-                            foundBill.status === "paid"
-                              ? "default"
-                              : "secondary"
-                          }
-                        >
-                          {foundBill.status.charAt(0).toUpperCase() +
-                            foundBill.status.slice(1)}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="pt-4">
-                      <Label className="text-sm font-medium text-gray-600 mb-3 block">
-                        Choose Payment Method
-                      </Label>
-                      <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          "CARD",
+                          "BANK_TRANSFER",
+                          "USSD",
+                          "MOBILE_MONEY",
+                        ] as const
+                      ).map((method) => (
                         <Button
-                          className="flex-col h-auto py-3"
+                          key={method}
+                          variant={method === "CARD" ? "default" : "outline"}
                           onClick={() =>
                             handlePayment(
-                              foundBill.id,
+                              foundBill._id,
                               foundBill.amount,
-                              "CARD",
+                              method,
                             )
                           }
                           disabled={foundBill.status === "paid"}
                         >
-                          <CreditCard className="w-5 h-5 mb-1" />
-                          <span className="text-xs">Card</span>
+                          <CreditCard className="w-4 h-4 mr-2" />
+                          {method.replace("_", " ")}
                         </Button>
-                        <Button
-                          variant="outline"
-                          className="flex-col h-auto py-3"
-                          onClick={() =>
-                            handlePayment(
-                              foundBill.id,
-                              foundBill.amount,
-                              "BANK_TRANSFER",
-                            )
-                          }
-                          disabled={foundBill.status === "paid"}
-                        >
-                          <CreditCard className="w-5 h-5 mb-1" />
-                          <span className="text-xs">Bank Transfer</span>
-                        </Button>
-                        <Button
-                          variant="outline"
-                          className="flex-col h-auto py-3"
-                          onClick={() =>
-                            handlePayment(
-                              foundBill.id,
-                              foundBill.amount,
-                              "USSD",
-                            )
-                          }
-                          disabled={foundBill.status === "paid"}
-                        >
-                          <CreditCard className="w-5 h-5 mb-1" />
-                          <span className="text-xs">USSD</span>
-                        </Button>
-                        <Button
-                          variant="outline"
-                          className="flex-col h-auto py-3"
-                          onClick={() =>
-                            handlePayment(
-                              foundBill.id,
-                              foundBill.amount,
-                              "MOBILE_MONEY",
-                            )
-                          }
-                          disabled={foundBill.status === "paid"}
-                        >
-                          <CreditCard className="w-5 h-5 mb-1" />
-                          <span className="text-xs">Mobile Money</span>
-                        </Button>
-                      </div>
+                      ))}
                     </div>
-
-                    <div className="flex space-x-2 pt-2">
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={() =>
-                          downloadBillPDF(foundBill.id, foundBill.binId)
-                        }
-                      >
-                        <Download className="w-4 h-4 mr-2" />
-                        Download Bill
-                      </Button>
-                    </div>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() =>
+                        downloadBillPDF(foundBill._id, foundBill.binId)
+                      }
+                    >
+                      <Download className="w-4 h-4 mr-2" /> Download Bill
+                    </Button>
                   </CardContent>
                 </Card>
               )}
             </div>
 
-            {/* Upcoming Bills */}
             <div>
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
-                    <Calendar className="w-5 h-5 mr-2" />
-                    Upcoming Bills
+                    <Calendar className="w-5 h-5 mr-2" /> Upcoming Bills
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -996,18 +844,6 @@ export default function DashboardPage() {
                         <p className="font-medium text-blue-600">
                           {bill.binRegistration?.binId}
                         </p>
-                        <p className="text-sm text-gray-600 mb-1">
-                          {bill.binRegistration?.address},{" "}
-                          {bill.binRegistration?.lga}
-                        </p>
-                        <div className="flex items-center justify-between mb-2">
-                          <Badge variant="outline" className="text-xs">
-                            {bill.binRegistration?.zone}
-                          </Badge>
-                          <p className="text-sm text-gray-600">
-                            {bill.binRegistration?.state}
-                          </p>
-                        </div>
                         <p className="text-lg font-bold text-green-600">
                           ₦{bill.amount.toLocaleString()}
                         </p>
@@ -1018,8 +854,7 @@ export default function DashboardPage() {
                               handlePayment(bill._id, bill.amount, "CARD")
                             }
                           >
-                            <CreditCard className="w-3 h-3 mr-1" />
-                            Card
+                            <CreditCard className="w-3 h-3 mr-1" /> Card
                           </Button>
                           <Button
                             size="sm"
@@ -1034,28 +869,6 @@ export default function DashboardPage() {
                           >
                             Bank
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              handlePayment(bill._id, bill.amount, "USSD")
-                            }
-                          >
-                            USSD
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              handlePayment(
-                                bill._id,
-                                bill.amount,
-                                "MOBILE_MONEY",
-                              )
-                            }
-                          >
-                            Mobile
-                          </Button>
                         </div>
                       </div>
                     ))
@@ -1065,16 +878,14 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
+
+        {/* ─── Payment History Tab ─── */}
         {activeTab === "history" && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
-                <History className="w-5 h-5 mr-2" />
-                Payment History
+                <History className="w-5 h-5 mr-2" /> Payment History
               </CardTitle>
-              <CardDescription>
-                View all your past waste bin payments
-              </CardDescription>
             </CardHeader>
             <CardContent>
               {isLoadingPayments ? (
@@ -1100,18 +911,6 @@ export default function DashboardPage() {
                           <p className="font-medium text-blue-600">
                             {payment.bill?.binRegistration?.binId}
                           </p>
-                          <p className="text-sm text-gray-600">
-                            {payment.bill?.binRegistration?.address},{" "}
-                            {payment.bill?.binRegistration?.lga}
-                          </p>
-                          <div className="flex items-center space-x-2 mt-1">
-                            <Badge variant="outline" className="text-xs">
-                              {payment.bill?.binRegistration?.zone}
-                            </Badge>
-                            <span className="text-sm text-gray-500">
-                              {payment.bill?.binRegistration?.state}
-                            </span>
-                          </div>
                           <p className="text-sm text-gray-500">
                             {new Date(payment.createdAt).toLocaleDateString()}
                           </p>
@@ -1130,26 +929,6 @@ export default function DashboardPage() {
                         >
                           {payment.status}
                         </Badge>
-                        <div className="flex space-x-1 mt-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              downloadBillPDF(
-                                payment.bill?._id,
-                                payment.bill?.binRegistration?.binId,
-                              )
-                            }
-                            disabled={payment.status !== "completed"}
-                          >
-                            <Download className="w-4 h-4" />
-                          </Button>
-                          {payment.status === "completed" && (
-                            <Button variant="outline" size="sm">
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                          )}
-                        </div>
                       </div>
                     </div>
                   ))}
@@ -1158,12 +937,13 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* ─── My Bins Tab ─── */}
         {activeTab === "my-bins" && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
-                <Trash2 className="w-5 h-5 mr-2" />
-                My Active Bins
+                <Trash2 className="w-5 h-5 mr-2" /> My Active Bins
               </CardTitle>
               <CardDescription>Manage your linked waste bins</CardDescription>
             </CardHeader>
@@ -1174,78 +954,45 @@ export default function DashboardPage() {
                 </div>
               ) : userBins.length === 0 ? (
                 <div className="text-center py-12">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Trash2 className="w-8 h-8 text-gray-400" />
-                  </div>
-                  <p className="text-gray-500 mb-2">No linked bins yet</p>
-                  <p className="text-sm text-gray-400 mb-6">
-                    Search for your address to link a bin to your account
-                  </p>
+                  <Trash2 className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500 mb-4">No linked bins yet</p>
                   <Button onClick={() => setActiveTab("profile")}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Find My Bin
+                    <Plus className="w-4 h-4 mr-2" /> Register or Find My Bin
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {userBins.map((bin: any) => (
-                    <div
-                      key={bin._id}
-                      className="p-4 border rounded-lg hover:border-green-500 transition-colors"
-                    >
+                    <div key={bin._id} className="p-4 border rounded-lg">
                       <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-2">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
                             <Badge
                               variant="outline"
-                              className="text-blue-600 border-blue-600"
+                              className="text-blue-600 border-blue-600 font-mono"
                             >
                               {bin.binId}
                             </Badge>
                             {bin.isActive && (
-                              <Badge variant="default" className="bg-green-600">
-                                Active
+                              <Badge className="bg-green-600">Active</Badge>
+                            )}
+                            {bin.status === "PENDING" && (
+                              <Badge className="bg-yellow-500">
+                                Pending Approval
                               </Badge>
                             )}
                           </div>
-                          <p className="font-medium text-gray-900 mb-1">
-                            {bin.address}
-                          </p>
+                          <p className="font-medium">{bin.address}</p>
                           <p className="text-sm text-gray-600">
-                            {bin.lgaName}, {bin.stateCode.toUpperCase()}
-                          </p>
-                          {bin.customerRef && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              Ref: {bin.customerRef}
-                            </p>
-                          )}
-                          <p className="text-xs text-gray-400 mt-2">
-                            Registered:{" "}
-                            {new Date(bin.createdAt).toLocaleDateString()}
+                            {bin.lgaName}, {bin.stateCode?.toUpperCase()}
                           </p>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex gap-2">
                           <Button
-                            variant="outline"
                             size="sm"
-                            onClick={() => {
-                              setBillLookup({
-                                state: bin.stateCode,
-                                binId: bin.binId,
-                                customerRef: "",
-                              });
-                              setActiveTab("pay-bill");
-                              handleBillLookup();
-                            }}
-                          >
-                            <CreditCard className="w-4 h-4 mr-1" />
-                            Pay Bill
-                          </Button>
-                          <Button
                             variant="outline"
-                            size="sm"
                             onClick={() => handleUnlinkBin(bin.binId)}
-                            className="text-red-600 hover:text-red-700 hover:border-red-600"
+                            className="text-red-600"
                           >
                             Unlink
                           </Button>
@@ -1253,112 +1000,119 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   ))}
-
-                  <div className="pt-4 border-t">
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setActiveTab("profile")}
-                    >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Link Another Bin
-                    </Button>
-                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setActiveTab("profile")}
+                  >
+                    <Plus className="w-4 h-4 mr-2" /> Link Another Bin
+                  </Button>
                 </div>
               )}
             </CardContent>
           </Card>
         )}
+
+        {/* ─── Notifications Tab ─── */}
         {activeTab === "notifications" && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <span className="flex items-center">
-                  <Bell className="w-5 h-5 mr-2" />
-                  Notifications
+                  <Bell className="w-5 h-5 mr-2" /> Notifications
                 </span>
                 {unreadCount > 0 && (
                   <Badge variant="destructive">{unreadCount} unread</Badge>
                 )}
               </CardTitle>
-              <CardDescription>
-                Stay updated on your bills and payments
-              </CardDescription>
             </CardHeader>
             <CardContent>
               {notifications.length === 0 ? (
                 <div className="text-center py-12">
                   <Bell className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500 mb-2">No notifications yet</p>
-                  <p className="text-sm text-gray-400">
-                    You'll be notified when new bills are generated
+                  <p className="text-gray-500">No notifications yet</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    You'll be notified when your address is approved or rejected
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {notifications.map((notification) => (
+                  {notifications.map((n) => (
                     <div
-                      key={notification._id}
-                      className={`p-4 border rounded-lg transition-colors ${
-                        notification.isRead
-                          ? "bg-white"
-                          : "bg-blue-50 border-blue-200"
-                      }`}
+                      key={n._id}
+                      className={`p-4 border rounded-lg ${n.isRead ? "bg-white" : "bg-blue-50 border-blue-200"}`}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-1">
-                            {notification.type === "NEW_BILL" && (
-                              <Badge
-                                variant="outline"
-                                className="bg-green-50 text-green-700 border-green-300"
-                              >
+                          <div className="flex items-center gap-2 mb-1">
+                            {!n.isRead && (
+                              <div className="w-2 h-2 bg-blue-600 rounded-full" />
+                            )}
+                            {n.type === "ADDRESS_APPROVED" && (
+                              <Badge className="bg-green-100 text-green-700">
+                                Address Approved ✅
+                              </Badge>
+                            )}
+                            {n.type === "ADDRESS_REJECTED" && (
+                              <Badge className="bg-red-100 text-red-700">
+                                Address Rejected ❌
+                              </Badge>
+                            )}
+                            {n.type === "NEW_BILL" && (
+                              <Badge className="bg-blue-100 text-blue-700">
                                 New Bill
                               </Badge>
                             )}
-                            {!notification.isRead && (
-                              <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
+                            {n.type === "OVERDUE_BILL" && (
+                              <Badge className="bg-red-100 text-red-700">
+                                Overdue Bill
+                              </Badge>
                             )}
                           </div>
                           <h4 className="font-medium text-gray-900">
-                            {notification.title}
+                            {n.title}
                           </h4>
                           <p className="text-sm text-gray-600 mt-1">
-                            {notification.message}
+                            {n.message}
                           </p>
+                          {/* Show bin ID prominently for approved addresses */}
+                          {n.type === "ADDRESS_APPROVED" &&
+                            n.metadata?.binId && (
+                              <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded flex items-center gap-2">
+                                <MapPin className="w-4 h-4 text-green-600" />
+                                <span className="text-sm text-green-800">
+                                  Your Bin ID:{" "}
+                                  <span className="font-mono font-bold text-green-900">
+                                    {n.metadata.binId}
+                                  </span>
+                                </span>
+                              </div>
+                            )}
                           <p className="text-xs text-gray-400 mt-2">
-                            {new Date(notification.createdAt).toLocaleString()}
+                            {new Date(n.createdAt).toLocaleString()}
                           </p>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              // Mark as read via API
-                              await billsApi.markNotificationRead(
-                                notification._id,
-                              );
-                              // Update local state
-                              setNotifications(
-                                notifications.map((n) =>
-                                  n._id === notification._id
-                                    ? { ...n, isRead: true }
-                                    : n,
-                                ),
-                              );
-                              setUnreadCount((prev) => Math.max(0, prev - 1));
-                              setActiveTab("pay-bill");
-                            } catch (err) {
-                              console.error(
-                                "Failed to mark notification as read:",
-                                err,
-                              );
-                            }
-                          }}
-                        >
-                          View Bill
-                        </Button>
+                        {!n.isRead && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                await billsApi.markNotificationRead(n._id);
+                                setNotifications((prev) =>
+                                  prev.map((x) =>
+                                    x._id === n._id
+                                      ? { ...x, isRead: true }
+                                      : x,
+                                  ),
+                                );
+                                setUnreadCount((c) => Math.max(0, c - 1));
+                              } catch (_) {}
+                            }}
+                          >
+                            Mark read
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1370,13 +1124,11 @@ export default function DashboardPage() {
                       onClick={async () => {
                         try {
                           await billsApi.markAllNotificationsRead();
-                          setNotifications(
-                            notifications.map((n) => ({ ...n, isRead: true })),
+                          setNotifications((prev) =>
+                            prev.map((n) => ({ ...n, isRead: true })),
                           );
                           setUnreadCount(0);
-                        } catch (err) {
-                          console.error("Failed to mark all as read:", err);
-                        }
+                        } catch (_) {}
                       }}
                     >
                       Mark All as Read
@@ -1387,57 +1139,68 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* ─── Profile Tab ─── */}
         {activeTab === "profile" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <Card>
               <CardHeader>
                 <CardTitle>Profile Information</CardTitle>
-                <CardDescription>
-                  Update your personal information
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label htmlFor="name">Name</Label>
-                  <Input id="name" defaultValue={user?.name} />
+                  <Label>Name</Label>
+                  <Input
+                    defaultValue={`${user?.firstName || ""} ${user?.lastName || ""}`.trim()}
+                    readOnly
+                  />
                 </div>
                 <div>
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" defaultValue={user?.email} />
+                  <Label>Email</Label>
+                  <Input defaultValue={user?.email} readOnly />
                 </div>
                 <div>
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input id="phone" defaultValue={user?.phone} />
+                  <Label>Phone</Label>
+                  <Input defaultValue={user?.phone} readOnly />
                 </div>
-                <Button>Update Profile</Button>
+                <div>
+                  <Label>State</Label>
+                  <Input
+                    defaultValue={
+                      user?.stateCode?.toUpperCase() || "Not assigned"
+                    }
+                    readOnly
+                  />
+                </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>My Bins</CardTitle>
-                <CardDescription>Manage your linked waste bins</CardDescription>
+                <CardTitle>My Bins & Address Registration</CardTitle>
+                <CardDescription>
+                  Link an existing bin or register a new address for approval
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {isLoadingBins ? (
-                  <div className="flex justify-center py-4">
-                    <Loader2 className="w-6 h-6 animate-spin text-green-600" />
-                  </div>
-                ) : userBins.length > 0 ? (
-                  <div className="space-y-3">
+                {/* Existing bins */}
+                {userBins.length > 0 && (
+                  <div className="space-y-2">
                     {userBins.map((bin: any) => (
                       <div
                         key={bin._id}
                         className="flex items-center justify-between p-3 border rounded-lg"
                       >
                         <div>
-                          <p className="font-medium text-blue-600">
+                          <p className="font-medium text-blue-600 font-mono">
                             {bin.binId}
                           </p>
                           <p className="text-sm text-gray-600">{bin.address}</p>
-                          <p className="text-xs text-gray-500">
-                            {bin.lgaName}, {bin.stateCode}
-                          </p>
+                          {bin.status === "PENDING" && (
+                            <Badge className="bg-yellow-100 text-yellow-700 text-xs mt-1">
+                              Pending Admin Approval
+                            </Badge>
+                          )}
                         </div>
                         <Button
                           variant="outline"
@@ -1449,13 +1212,6 @@ export default function DashboardPage() {
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div className="text-center py-6">
-                    <p className="text-gray-500 mb-4">No linked bins yet</p>
-                    <p className="text-sm text-gray-400">
-                      Search for your address below to link a bin
-                    </p>
-                  </div>
                 )}
 
                 {!showAddressSearch ? (
@@ -1464,12 +1220,11 @@ export default function DashboardPage() {
                     className="w-full"
                     onClick={() => setShowAddressSearch(true)}
                   >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Find My Bin
+                    <Plus className="w-4 h-4 mr-2" /> Find or Register My Bin
                   </Button>
                 ) : (
-                  <div className="space-y-4 mt-4 p-4 border rounded-lg bg-gray-50">
-                    <div className="flex items-center justify-between mb-2">
+                  <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
+                    <div className="flex items-center justify-between">
                       <h4 className="font-medium">Search for Your Address</h4>
                       <Button
                         variant="ghost"
@@ -1477,6 +1232,7 @@ export default function DashboardPage() {
                         onClick={() => {
                           setShowAddressSearch(false);
                           setSearchResults([]);
+                          setHasSearched(false);
                           setAddressSearch({
                             address: "",
                             stateCode: "",
@@ -1489,29 +1245,24 @@ export default function DashboardPage() {
                     </div>
 
                     <div>
-                      <Label htmlFor="searchAddress">Address</Label>
+                      <Label>Address</Label>
                       <Input
-                        id="searchAddress"
                         placeholder="e.g., 123 Main Street"
                         value={addressSearch.address}
                         onChange={(e) =>
-                          setAddressSearch((prev) => ({
-                            ...prev,
+                          setAddressSearch((p) => ({
+                            ...p,
                             address: e.target.value,
                           }))
                         }
                       />
                     </div>
-
                     <div>
-                      <Label htmlFor="searchState">State</Label>
+                      <Label>State</Label>
                       <Select
                         value={addressSearch.stateCode}
-                        onValueChange={(value) =>
-                          setAddressSearch((prev) => ({
-                            ...prev,
-                            stateCode: value,
-                          }))
+                        onValueChange={(v) =>
+                          setAddressSearch((p) => ({ ...p, stateCode: v }))
                         }
                       >
                         <SelectTrigger>
@@ -1521,6 +1272,8 @@ export default function DashboardPage() {
                           <SelectItem value="lagos">Lagos</SelectItem>
                           <SelectItem value="fct">FCT (Abuja)</SelectItem>
                           <SelectItem value="enugu">Enugu</SelectItem>
+                          <SelectItem value="rivers">Rivers</SelectItem>
+                          <SelectItem value="anambra">Anambra</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1531,21 +1284,16 @@ export default function DashboardPage() {
                       disabled={isSearching}
                     >
                       {isSearching ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Searching...
-                        </>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       ) : (
-                        <>
-                          <Search className="w-4 h-4 mr-2" />
-                          Search
-                        </>
+                        <Search className="w-4 h-4 mr-2" />
                       )}
+                      Search Existing Addresses
                     </Button>
 
-                    {/* Search Results */}
-                    {searchResults.length > 0 && (
-                      <div className="mt-4 space-y-2">
+                    {/* Search results */}
+                    {hasSearched && searchResults.length > 0 && (
+                      <div className="space-y-2">
                         <p className="text-sm font-medium text-gray-700">
                           Found {searchResults.length} address(es):
                         </p>
@@ -1555,14 +1303,11 @@ export default function DashboardPage() {
                             className="flex items-center justify-between p-3 border rounded bg-white"
                           >
                             <div>
-                              <p className="font-medium text-blue-600">
+                              <p className="font-mono font-medium text-blue-600">
                                 {result.binId}
                               </p>
                               <p className="text-sm text-gray-600">
                                 {result.address}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {result.lgaName}, {result.stateCode}
                               </p>
                             </div>
                             <Button
@@ -1575,6 +1320,62 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     )}
+
+                    {/* FIX: show register form when search has been done and found nothing,
+                        OR always show it as an alternative below the search results */}
+                    <div className="border-t pt-4">
+                      <p className="text-sm font-medium text-gray-700 mb-3">
+                        {hasSearched && searchResults.length === 0
+                          ? "No address found. Register a new one:"
+                          : "Or register a new address:"}
+                      </p>
+                      <div className="space-y-3">
+                        <div>
+                          <Label>LGA *</Label>
+                          <Input
+                            placeholder="e.g., Ikeja"
+                            value={addressSearch.lgaName}
+                            onChange={(e) =>
+                              setAddressSearch((p) => ({
+                                ...p,
+                                lgaName: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          Your state (
+                          {user?.stateCode?.toUpperCase() || "unknown"}) will be
+                          used automatically. The address and LGA above will be
+                          submitted.
+                        </p>
+                        <Button
+                          className="w-full"
+                          onClick={handleRegisterAddress}
+                          disabled={
+                            isRegisteringAddress ||
+                            !addressSearch.address ||
+                            !addressSearch.lgaName
+                          }
+                        >
+                          {isRegisteringAddress ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />{" "}
+                              Submitting...
+                            </>
+                          ) : (
+                            <>
+                              <MapPin className="w-4 h-4 mr-2" /> Submit Address
+                              for Approval
+                            </>
+                          )}
+                        </Button>
+                        <p className="text-xs text-gray-400 text-center">
+                          Your state admin will review and approve your address.
+                          You'll be notified when done.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </CardContent>

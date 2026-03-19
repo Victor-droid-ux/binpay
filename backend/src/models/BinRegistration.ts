@@ -1,5 +1,11 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export enum BinRegistrationStatus {
+  PENDING = "PENDING",
+  APPROVED = "APPROVED",
+  REJECTED = "REJECTED",
+}
+
 export interface IBinRegistration extends Document {
   binId: string;
   userId?: mongoose.Types.ObjectId;
@@ -8,6 +14,7 @@ export interface IBinRegistration extends Document {
   address: string;
   customerRef?: string;
   isActive: boolean;
+  status: BinRegistrationStatus;
   registeredAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -22,6 +29,11 @@ const binRegistrationSchema = new Schema<IBinRegistration>(
     address: { type: String, required: true },
     customerRef: { type: String },
     isActive: { type: Boolean, default: true },
+    status: {
+      type: String,
+      enum: Object.values(BinRegistrationStatus),
+      default: BinRegistrationStatus.PENDING,
+    },
     registeredAt: { type: Date, default: Date.now },
   },
   {

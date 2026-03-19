@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,26 +13,24 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Pagination,
   PaginationContent,
@@ -39,358 +40,117 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+
 import {
-  Shield,
-  Users,
-  CreditCard,
-  FileText,
-  Settings,
-  LogOut,
-  TrendingUp,
   AlertCircle,
+  BarChart4,
+  Bell,
+  Calendar,
   CheckCircle,
   CheckCircle2,
-  Download,
-  Search,
-  MoreHorizontal,
-  Eye,
-  Edit,
-  Trash2,
-  Plus,
-  Mail,
-  Phone,
-  Calendar,
-  BarChart4,
-  PieChart,
-  LineChart,
-  Printer,
   Clock,
-  MapPin,
+  CreditCard,
+  Download,
+  Edit,
+  Eye,
+  FileText,
+  Filter,
+  Layers,
+  LineChart,
+  Loader2,
+  LogOut,
   Map,
+  MapPin,
+  Maximize,
+  MessageSquare,
+  Minimize,
+  MoreHorizontal,
+  Navigation,
+  PieChart,
+  Plus,
+  Printer,
+  Search,
+  Settings,
+  Shield,
+  Trash2,
+  TrendingUp,
+  Users,
+  X,
   ZoomIn,
   ZoomOut,
-  Layers,
-  Filter,
-  Navigation,
-  Maximize,
-  Minimize,
-  Bell,
-  MessageSquare,
-  Loader2,
 } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+
 import { Logo } from "@/components/logo";
-import { authApi, adminApi, ApiError } from "@/lib/api";
-import { NIGERIAN_STATES, getStateByCode } from "@/lib/states-data";
+import { NotificationTab } from "@/components/notification-tab";
+import { adminApi, authApi, ApiError } from "@/lib/api";
+import {
+  NIGERIAN_STATES,
+  STATE_MAP_CENTERS,
+  getCurrentStateLGAs,
+} from "@/lib/constants";
 
 export default function AdminDashboardPage() {
-  // Add missing state and hooks
   const router = useRouter();
   const { toast } = useToast();
+
+  // ─── State declarations ────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState("overview");
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [stateStats, setStateStats] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
-  // Notifications state for state admin
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
 
-  // Load notifications for state admin (simulate with bills overdue for demo)
-  // Load notifications for state admin from backend
-  const loadNotifications = async () => {
-    try {
-      setIsLoadingNotifications(true);
-      const data = await adminApi.getNotifications();
-      setNotifications(data.notifications || []);
-    } catch (err: any) {
-      console.error("Failed to load notifications:", err);
-    } finally {
-      setIsLoadingNotifications(false);
-    }
-  };
-
-  // Load notifications on mount and when currentUser changes
-  useEffect(() => {
-    if (currentUser) loadNotifications();
-  }, [currentUser]);
-
-  // Notification Tab UI
-  const NotificationTab = () => {
-    const [markingRead, setMarkingRead] = useState<string | null>(null);
-
-    const handleMarkAsRead = async (id: string) => {
-      setMarkingRead(id);
-      // Simulate marking as read (no API)
-      setTimeout(() => {
-        setNotifications((prev) =>
-          prev.map((n) => (n._id === id ? { ...n, isRead: true } : n)),
-        );
-        setMarkingRead(null);
-      }, 500);
-    };
-
-    return (
-      <div className="space-y-6">
-        <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-          <Bell className="w-6 h-6 text-yellow-500" /> Bin Full Alerts
-        </h2>
-        {isLoadingNotifications ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="w-8 h-8 animate-spin text-green-600" />
-          </div>
-        ) : notifications.length === 0 ? (
-          <div className="text-gray-500 text-center py-8">
-            No notifications yet.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {notifications.map((n: any) => (
-              <Card
-                key={n._id}
-                className={`border-l-4 ${n.isRead ? "border-gray-300" : "border-yellow-500"} shadow-sm bg-white`}
-              >
-                <CardContent className="py-4 px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <Bell className="w-5 h-5 text-yellow-500" />
-                      <span className="font-semibold text-lg">{n.title}</span>
-                      {!n.isRead && <Badge variant="destructive">New</Badge>}
-                    </div>
-                    <div className="text-gray-800 mb-1">{n.message}</div>
-                    <div className="text-xs text-gray-500">
-                      {new Date(n.createdAt).toLocaleString()}
-                    </div>
-                  </div>
-                  {!n.isRead && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="mt-2 md:mt-0"
-                      disabled={markingRead === n._id}
-                      onClick={() => handleMarkAsRead(n._id)}
-                    >
-                      {markingRead === n._id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        "Mark as Read"
-                      )}
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // State map centers configuration
-  const STATE_MAP_CENTERS: Record<string, { lat: number; lng: number }> = {
-    EN: { lat: 6.5244, lng: 7.4883 }, // Enugu State
-    en: { lat: 6.5244, lng: 7.4883 }, // Enugu State (lowercase)
-    LA: { lat: 6.5244, lng: 3.3792 }, // Lagos State
-    la: { lat: 6.5244, lng: 3.3792 }, // Lagos State (lowercase)
-    lagos: { lat: 6.5244, lng: 3.3792 }, // Lagos State (alternative)
-    LAGOS: { lat: 6.5244, lng: 3.3792 }, // Lagos State (alternative uppercase)
-    FC: { lat: 9.0765, lng: 7.3986 }, // Federal Capital Territory (Abuja)
-    fc: { lat: 9.0765, lng: 7.3986 }, // Federal Capital Territory (lowercase)
-    fct: { lat: 9.0765, lng: 7.3986 }, // Federal Capital Territory (alternative)
-    FCT: { lat: 9.0765, lng: 7.3986 }, // Federal Capital Territory (alternative uppercase)
-  };
-
-  // Enugu State LGA boundaries and major areas
-  const enuguStateLGAs = [
-    {
-      name: "Enugu North",
-      center: { lat: 6.4598, lng: 7.5149 },
-      color: "#3B82F6",
-    },
-    {
-      name: "Enugu South",
-      center: { lat: 6.4372, lng: 7.5186 },
-      color: "#10B981",
-    },
-    {
-      name: "Enugu East",
-      center: { lat: 6.4474, lng: 7.5248 },
-      color: "#F59E0B",
-    },
-    { name: "Nsukka", center: { lat: 6.8567, lng: 7.3958 }, color: "#EF4444" },
-    {
-      name: "Oji River",
-      center: { lat: 6.2167, lng: 7.2167 },
-      color: "#8B5CF6",
-    },
-    { name: "Awgu", center: { lat: 6.0833, lng: 7.4833 }, color: "#06B6D4" },
-    { name: "Udi", center: { lat: 6.3167, lng: 7.4333 }, color: "#84CC16" },
-    {
-      name: "Nkanu West",
-      center: { lat: 6.2833, lng: 7.6167 },
-      color: "#F97316",
-    },
-    {
-      name: "Nkanu East",
-      center: { lat: 6.3167, lng: 7.6833 },
-      color: "#EC4899",
-    },
-    { name: "Ezeagu", center: { lat: 6.35, lng: 7.15 }, color: "#6366F1" },
-    {
-      name: "Igbo Etiti",
-      center: { lat: 6.7833, lng: 7.2833 },
-      color: "#14B8A6",
-    },
-    {
-      name: "Uzo Uwani",
-      center: { lat: 6.8167, lng: 7.5167 },
-      color: "#F43F5E",
-    },
-    {
-      name: "Igbo Eze North",
-      center: { lat: 6.9167, lng: 7.4167 },
-      color: "#A855F7",
-    },
-    {
-      name: "Igbo Eze South",
-      center: { lat: 6.8833, lng: 7.45 },
-      color: "#22C55E",
-    },
-    { name: "Udenu", center: { lat: 6.95, lng: 7.35 }, color: "#EAB308" },
-    { name: "Aninri", center: { lat: 6.2167, lng: 7.5833 }, color: "#DC2626" },
-    { name: "Isi Uzo", center: { lat: 6.75, lng: 7.5833 }, color: "#7C3AED" },
-  ];
-
-  // Lagos State LGA boundaries and major areas
-  const lagosStateLGAs = [
-    { name: "Ikeja", center: { lat: 6.5964, lng: 3.3406 }, color: "#3B82F6" },
-    {
-      name: "Lagos Island",
-      center: { lat: 6.4541, lng: 3.3947 },
-      color: "#10B981",
-    },
-    {
-      name: "Lagos Mainland",
-      center: { lat: 6.5023, lng: 3.3792 },
-      color: "#F59E0B",
-    },
-    {
-      name: "Surulere",
-      center: { lat: 6.4969, lng: 3.3481 },
-      color: "#EF4444",
-    },
-    { name: "Ikorodu", center: { lat: 6.6194, lng: 3.5117 }, color: "#8B5CF6" },
-    { name: "Epe", center: { lat: 6.5833, lng: 3.9833 }, color: "#06B6D4" },
-    { name: "Badagry", center: { lat: 6.4167, lng: 2.8833 }, color: "#84CC16" },
-    {
-      name: "Alimosho",
-      center: { lat: 6.5833, lng: 3.2667 },
-      color: "#F97316",
-    },
-    {
-      name: "Oshodi-Isolo",
-      center: { lat: 6.5333, lng: 3.3333 },
-      color: "#EC4899",
-    },
-    { name: "Mushin", center: { lat: 6.5272, lng: 3.345 }, color: "#6366F1" },
-  ];
-
-  // FCT Area Councils
-  const fctAreaCouncils = [
-    {
-      name: "Abuja Municipal",
-      center: { lat: 9.0579, lng: 7.4951 },
-      color: "#3B82F6",
-    },
-    {
-      name: "Gwagwalada",
-      center: { lat: 8.9428, lng: 7.0833 },
-      color: "#10B981",
-    },
-    { name: "Kuje", center: { lat: 8.8833, lng: 7.2333 }, color: "#F59E0B" },
-    { name: "Bwari", center: { lat: 9.2833, lng: 7.3833 }, color: "#EF4444" },
-    { name: "Kwali", center: { lat: 8.8833, lng: 7.0167 }, color: "#8B5CF6" },
-    { name: "Abaji", center: { lat: 8.7167, lng: 6.7333 }, color: "#06B6D4" },
-  ];
-
-  // Helper to get LGAs for current state
-  const getCurrentStateLGAs = () => {
-    const code = currentUser?.stateCode?.toUpperCase() || "EN";
-    if (code === "LA" || code === "LAGOS") return lagosStateLGAs;
-    if (code === "FC" || code === "FCT") return fctAreaCouncils;
-    return enuguStateLGAs;
-  };
-
-  // Data loading states
+  // Data
   const [bills, setBills] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [addresses, setAddresses] = useState<any[]>([]);
-  const [isLoadingBills, setIsLoadingBills] = useState(false);
+
+  // Loading states
   const [isLoadingPayments, setIsLoadingPayments] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
 
-  // Bills state
+  // Bills tab
   const [billsSearchQuery, setBillsSearchQuery] = useState("");
   const [billsStatusFilter, setBillsStatusFilter] = useState("all");
   const [billsCurrentPage, setBillsCurrentPage] = useState(1);
-  const billsPerPage = 5;
+  const billsPerPage = 10;
 
-  const [isNotificationSending, setIsNotificationSending] = useState<
-    string | null
-  >(null);
-  const [notificationSuccess, setNotificationSuccess] = useState<string | null>(
-    null,
-  );
-
-  // Payments state
+  // Payments tab
   const [paymentsSearchQuery, setPaymentsSearchQuery] = useState("");
   const [paymentsStatusFilter, setPaymentsStatusFilter] = useState("all");
   const [paymentsCurrentPage, setPaymentsCurrentPage] = useState(1);
-  const paymentsPerPage = 5;
+  const paymentsPerPage = 10;
 
-  // Users state
+  // Users tab
   const [usersSearchQuery, setUsersSearchQuery] = useState("");
   const [usersStatusFilter, setUsersStatusFilter] = useState("all");
   const [usersCurrentPage, setUsersCurrentPage] = useState(1);
-  const usersPerPage = 5;
+  const usersPerPage = 10;
 
-  // Addresses state
+  // Addresses tab
   const [addressesSearchQuery, setAddressesSearchQuery] = useState("");
   const [addressesStatusFilter, setAddressesStatusFilter] = useState("all");
   const [addressesCurrentPage, setAddressesCurrentPage] = useState(1);
   const addressesPerPage = 10;
-
-  // Reports state
-  const [reportsTypeFilter, setReportsTypeFilter] = useState("all");
-  const [selectedReport, setSelectedReport] = useState<string | null>(null);
-
-  // Map state
-  const [mapFilter, setMapFilter] = useState("all");
-  const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
-  const [mapZoom, setMapZoom] = useState(10);
-  const [mapCenter, setMapCenter] = useState({ lat: 6.5244, lng: 7.4883 }); // Default to Enugu, will be updated based on state
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showLGABoundaries, setShowLGABoundaries] = useState(true);
-
-  // Address registration state
   const [isAddAddressOpen, setIsAddAddressOpen] = useState(false);
   const [newAddress, setNewAddress] = useState({
     lgaName: "",
@@ -399,12 +159,6 @@ export default function AdminDashboardPage() {
   });
   const [isRegisteringAddress, setIsRegisteringAddress] = useState(false);
   const [registeredBinId, setRegisteredBinId] = useState<string | null>(null);
-
-  // Bill details dialog state
-  const [selectedBill, setSelectedBill] = useState<any>(null);
-  const [showBillDetails, setShowBillDetails] = useState(false);
-
-  // Address details dialog state
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
   const [showAddressDetails, setShowAddressDetails] = useState(false);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
@@ -414,23 +168,39 @@ export default function AdminDashboardPage() {
     customerRef: "",
   });
 
-  // Load bills for current state
+  // Reports tab
+  const [reportsTypeFilter, setReportsTypeFilter] = useState("all");
+  const [selectedReport, setSelectedReport] = useState<string | null>(null);
+
+  // Map tab
+  const [mapFilter, setMapFilter] = useState("all");
+  const [mapZoom, setMapZoom] = useState(10);
+  const [mapCenter, setMapCenter] = useState({ lat: 6.5244, lng: 3.3792 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showLGABoundaries, setShowLGABoundaries] = useState(false);
+
+  // Notifications
+  const [isNotificationSending, setIsNotificationSending] = useState<
+    string | null
+  >(null);
+  const [notificationSuccess, setNotificationSuccess] = useState<string | null>(
+    null,
+  );
+
+  // loadBills declared here so it's in scope for useEffect
   const loadBills = async (stateCode: string) => {
     try {
-      setIsLoadingBills(true);
       const response = await adminApi.getStateBills(stateCode, {
-        page: billsCurrentPage,
-        limit: 50, // Load more for local filtering
+        page: 1,
+        limit: 50,
       });
       setBills(response.bills || []);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to load bills:", err);
-    } finally {
-      setIsLoadingBills(false);
     }
   };
+  // ─── All state, helpers, and handlers must live INSIDE the component ───
 
-  // Load payments for current state
   const loadPayments = async (stateCode: string) => {
     try {
       setIsLoadingPayments(true);
@@ -446,7 +216,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Load users for current state
   const loadUsers = async (stateCode: string) => {
     try {
       setIsLoadingUsers(true);
@@ -462,7 +231,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Load registered addresses for current state
   const loadAddresses = async () => {
     try {
       setIsLoadingAddresses(true);
@@ -475,19 +243,16 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Handle address registration
   const handleRegisterAddress = async () => {
     if (!newAddress.lgaName || !newAddress.address) {
       alert("Please fill in all required fields");
       return;
     }
-
     try {
       setIsRegisteringAddress(true);
       const response = await adminApi.registerAddress(newAddress);
       setRegisteredBinId(response.binRegistration.binId);
       setNewAddress({ lgaName: "", address: "", customerRef: "" });
-      // Reload addresses list
       await loadAddresses();
     } catch (err: any) {
       console.error("Failed to register address:", err);
@@ -497,34 +262,25 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Handle logout
   const handleLogout = () => {
     localStorage.removeItem("token");
     router.push("/admin/login");
   };
 
-  // Check authentication and load state data
   useEffect(() => {
     const checkAuthAndLoadData = async () => {
       try {
-        // Check if user is authenticated and is STATE_ADMIN
         const userResponse = await authApi.getCurrentUser();
-
         if (userResponse.role !== "STATE_ADMIN") {
           router.push("/admin/login");
           return;
         }
-
         setCurrentUser(userResponse);
-
-        // Load state statistics and data if stateCode is available
         if (userResponse.stateCode) {
           const statsResponse = await adminApi.getStateStats(
             userResponse.stateCode,
           );
           setStateStats(statsResponse);
-
-          // Load bills, payments, users, and addresses
           await Promise.all([
             loadBills(userResponse.stateCode),
             loadPayments(userResponse.stateCode),
@@ -543,28 +299,25 @@ export default function AdminDashboardPage() {
         setIsInitialLoading(false);
       }
     };
-
     checkAuthAndLoadData();
   }, [router]);
 
-  // Update map center when currentUser changes
   useEffect(() => {
     if (currentUser?.stateCode) {
       const stateCode = currentUser.stateCode;
-      console.log("Setting map center for state:", stateCode);
       const center =
         STATE_MAP_CENTERS[stateCode] ||
         STATE_MAP_CENTERS[stateCode.toUpperCase()];
       if (center) {
-        console.log("Map center found:", center);
-        setMapCenter(center);
-      } else {
-        console.log("No map center found for state code:", stateCode);
+        if (Array.isArray(center)) {
+          setMapCenter({ lat: center[0], lng: center[1] });
+        } else {
+          setMapCenter(center);
+        }
       }
     }
   }, [currentUser]);
 
-  // Use loaded state info
   const stateInfo = currentUser
     ? {
         name: currentUser.stateCode?.toUpperCase() || "Unknown",
@@ -582,7 +335,6 @@ export default function AdminDashboardPage() {
         adminEmail: "",
       };
 
-  // Use loaded stats
   const stats = stateStats?.stats || {
     totalUsers: 0,
     totalBills: 0,
@@ -595,38 +347,31 @@ export default function AdminDashboardPage() {
     activeUsers: 0,
   };
 
-  // Filter bills based on search query and status filter
   const filteredBills = bills.filter((bill) => {
     const binId = bill.binRegistration?.binId || "";
     const address = bill.binRegistration?.address || "";
     const zone = bill.binRegistration?.zone || "";
-
     const matchesSearch =
       bill._id?.toLowerCase().includes(billsSearchQuery.toLowerCase()) ||
       binId.toLowerCase().includes(billsSearchQuery.toLowerCase()) ||
       address.toLowerCase().includes(billsSearchQuery.toLowerCase()) ||
       zone.toLowerCase().includes(billsSearchQuery.toLowerCase());
-
     const matchesStatus =
       billsStatusFilter === "all" || bill.status === billsStatusFilter;
-
     return matchesSearch && matchesStatus;
   });
 
-  // Paginate bills
   const indexOfLastBill = billsCurrentPage * billsPerPage;
   const indexOfFirstBill = indexOfLastBill - billsPerPage;
   const currentBills = filteredBills.slice(indexOfFirstBill, indexOfLastBill);
   const totalBillsPages = Math.ceil(filteredBills.length / billsPerPage);
 
-  // Filter payments based on search query and status filter
   const filteredPayments = payments.filter((payment) => {
     const binId = payment.billId?.binRegistration?.binId || "";
     const address = payment.billId?.binRegistration?.address || "";
     const zone = payment.billId?.binRegistration?.zone || "";
     const userName =
       `${payment.userId?.firstName || ""} ${payment.userId?.lastName || ""}`.trim();
-
     const matchesSearch =
       payment._id?.toLowerCase().includes(paymentsSearchQuery.toLowerCase()) ||
       payment.reference
@@ -636,14 +381,11 @@ export default function AdminDashboardPage() {
       userName.toLowerCase().includes(paymentsSearchQuery.toLowerCase()) ||
       address.toLowerCase().includes(paymentsSearchQuery.toLowerCase()) ||
       zone.toLowerCase().includes(paymentsSearchQuery.toLowerCase());
-
     const matchesStatus =
       paymentsStatusFilter === "all" || payment.status === paymentsStatusFilter;
-
     return matchesSearch && matchesStatus;
   });
 
-  // Paginate payments
   const indexOfLastPayment = paymentsCurrentPage * paymentsPerPage;
   const indexOfFirstPayment = indexOfLastPayment - paymentsPerPage;
   const currentPayments = filteredPayments.slice(
@@ -654,30 +396,24 @@ export default function AdminDashboardPage() {
     filteredPayments.length / paymentsPerPage,
   );
 
-  // Filter users based on search query and status filter
   const filteredUsers = users.filter((user) => {
     const userName = `${user.firstName || ""} ${user.lastName || ""}`.trim();
-
     const matchesSearch =
       userName.toLowerCase().includes(usersSearchQuery.toLowerCase()) ||
       user.email?.toLowerCase().includes(usersSearchQuery.toLowerCase()) ||
       user.phone?.toLowerCase().includes(usersSearchQuery.toLowerCase());
-
     const matchesStatus =
       usersStatusFilter === "all" ||
       (usersStatusFilter === "active" && user.isActive) ||
       (usersStatusFilter === "inactive" && !user.isActive);
-
     return matchesSearch && matchesStatus;
   });
 
-  // Paginate users
   const indexOfLastUser = usersCurrentPage * usersPerPage;
   const indexOfFirstUser = indexOfLastUser - usersPerPage;
   const currentUsers = filteredUsers.slice(indexOfFirstUser, indexOfLastUser);
   const totalUsersPages = Math.ceil(filteredUsers.length / usersPerPage);
 
-  // Filter addresses based on search query and status filter
   const filteredAddresses = addresses.filter((address) => {
     const binId = address.binId || "";
     const addressText = address.address || "";
@@ -686,23 +422,19 @@ export default function AdminDashboardPage() {
     const linkedUser = address.userId
       ? `${address.userId.firstName || ""} ${address.userId.lastName || ""}`.trim()
       : "";
-
     const matchesSearch =
       binId.toLowerCase().includes(addressesSearchQuery.toLowerCase()) ||
       addressText.toLowerCase().includes(addressesSearchQuery.toLowerCase()) ||
       lgaName.toLowerCase().includes(addressesSearchQuery.toLowerCase()) ||
       customerRef.toLowerCase().includes(addressesSearchQuery.toLowerCase()) ||
       linkedUser.toLowerCase().includes(addressesSearchQuery.toLowerCase());
-
     const matchesStatus =
       addressesStatusFilter === "all" ||
       (addressesStatusFilter === "active" && address.isActive) ||
       (addressesStatusFilter === "inactive" && !address.isActive);
-
     return matchesSearch && matchesStatus;
   });
 
-  // Paginate addresses
   const indexOfLastAddress = addressesCurrentPage * addressesPerPage;
   const indexOfFirstAddress = indexOfLastAddress - addressesPerPage;
   const currentAddresses = filteredAddresses.slice(
@@ -713,49 +445,32 @@ export default function AdminDashboardPage() {
     filteredAddresses.length / addressesPerPage,
   );
 
-  // Filter reports based on type filter
-  const reportsData: any[] = []; // Reports feature not yet implemented
-  const filteredReports = reportsData.filter((report) => {
-    return reportsTypeFilter === "all" || report.type === reportsTypeFilter;
-  });
+  const reportsData: any[] = [];
+  const filteredReports = reportsData.filter(
+    (report) =>
+      reportsTypeFilter === "all" || report.type === reportsTypeFilter,
+  );
 
-  // Filter map markers based on status (use bills data)
-  const filteredMapData = bills.filter((bill) => {
-    if (mapFilter === "all") return true;
-    return bill.status === mapFilter;
-  });
+  const filteredMapData = bills.filter((bill) =>
+    mapFilter === "all" ? true : bill.status === mapFilter,
+  );
 
-  // Convert coordinates to pixel positions for the map
   const coordinateToPixel = (
     lat: number,
     lng: number,
     mapWidth: number,
     mapHeight: number,
   ) => {
-    // Enugu State bounds (approximate)
-    const bounds = {
-      north: 7.0,
-      south: 6.0,
-      east: 7.8,
-      west: 7.0,
-    };
-
-    // Apply zoom factor
+    const bounds = { north: 7.0, south: 6.0, east: 7.8, west: 7.0 };
     const zoomFactor = mapZoom / 10;
-    const centerLat = mapCenter.lat;
-    const centerLng = mapCenter.lng;
-
-    // Calculate visible bounds based on zoom and center
     const latRange = (bounds.north - bounds.south) / zoomFactor;
     const lngRange = (bounds.east - bounds.west) / zoomFactor;
-
     const visibleBounds = {
-      north: centerLat + latRange / 2,
-      south: centerLat - latRange / 2,
-      east: centerLng + lngRange / 2,
-      west: centerLng - lngRange / 2,
+      north: mapCenter.lat + latRange / 2,
+      south: mapCenter.lat - latRange / 2,
+      east: mapCenter.lng + lngRange / 2,
+      west: mapCenter.lng - lngRange / 2,
     };
-
     const x =
       ((lng - visibleBounds.west) / (visibleBounds.east - visibleBounds.west)) *
       mapWidth;
@@ -763,56 +478,32 @@ export default function AdminDashboardPage() {
       ((visibleBounds.north - lat) /
         (visibleBounds.north - visibleBounds.south)) *
       mapHeight;
-
     return {
       x: Math.max(0, Math.min(mapWidth, x)),
       y: Math.max(0, Math.min(mapHeight, y)),
     };
   };
 
-  // Format currency
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-NG", {
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("en-NG", {
       style: "currency",
       currency: "NGN",
       minimumFractionDigits: 0,
     }).format(amount);
-  };
 
-  // Format date
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-NG", {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString("en-NG", {
       year: "numeric",
       month: "short",
       day: "numeric",
     });
-  };
 
   const sendOverdueNotification = async (bill: any) => {
     setIsNotificationSending(bill.id);
-    console.log(
-      "[v0] Sending overdue notification to:",
-      bill.customerName,
-      bill.customerPhone,
-    );
-
     try {
-      // Simulate API call to send SMS/Email notification
       await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // In a real app, this would call your notification service
-      // await notificationService.sendOverdueNotification({
-      //   customerName: bill.customerName,
-      //   customerPhone: bill.customerPhone,
-      //   binId: bill.binId,
-      //   amount: bill.amount,
-      //   dueDate: bill.dueDate,
-      //   daysOverdue: Math.floor((new Date().getTime() - new Date(bill.dueDate).getTime()) / (1000 * 60 * 60 * 24))
-      // })
-
       setNotificationSuccess(bill.id);
       setTimeout(() => setNotificationSuccess(null), 3000);
-      console.log("[v0] Notification sent successfully to", bill.customerName);
     } catch (error) {
       console.error("[v0] Failed to send notification:", error);
     } finally {
@@ -821,14 +512,11 @@ export default function AdminDashboardPage() {
   };
 
   const sendBulkOverdueNotifications = async () => {
-    const overdueBills = bills.filter((bill) => bill.status === "overdue");
     setIsNotificationSending("bulk");
     try {
-      // Real API call to backend
       await adminApi.sendBulkOverdueNotifications(currentUser?.stateCode || "");
       setNotificationSuccess("bulk");
       setTimeout(() => setNotificationSuccess(null), 5000);
-      console.log("Bulk notifications sent successfully");
     } catch (error) {
       console.error("Failed to send bulk notifications:", error);
       toast({
@@ -841,6 +529,7 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // ─── JSX ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-green-50 to-yellow-50">
       {/* Loading State */}
@@ -932,12 +621,14 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="reports">Reports</TabsTrigger>
                 <TabsTrigger value="settings">Settings</TabsTrigger>
               </TabsList>
+
+              {/* ── Notifications ── */}
               <TabsContent value="notifications" className="mt-6">
                 <NotificationTab />
               </TabsContent>
 
+              {/* ── Overview ── */}
               <TabsContent value="overview" className="mt-6">
-                {/* Stats Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
                   <Card className="bg-gradient-to-br from-blue-100/80 to-blue-50 border-blue-200 shadow-md">
                     <CardContent className="p-6 flex items-center gap-4">
@@ -1001,7 +692,6 @@ export default function AdminDashboardPage() {
                   </Card>
                 </div>
 
-                {/* Recent Activity */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <Card>
                     <CardHeader>
@@ -1091,11 +781,11 @@ export default function AdminDashboardPage() {
                 </div>
               </TabsContent>
 
+              {/* ── Map ── */}
               <TabsContent value="map" className="mt-6">
                 <div
                   className={`grid gap-6 ${isFullscreen ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-4"}`}
                 >
-                  {/* Map Controls */}
                   {!isFullscreen && (
                     <div className="lg:col-span-1">
                       <Card className="h-full">
@@ -1109,7 +799,6 @@ export default function AdminDashboardPage() {
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                          {/* Status Filter */}
                           <div>
                             <Label className="text-sm font-medium">
                               Filter by Status
@@ -1138,7 +827,6 @@ export default function AdminDashboardPage() {
                             </Select>
                           </div>
 
-                          {/* LGA Boundaries Toggle */}
                           <div className="flex items-center space-x-2">
                             <input
                               type="checkbox"
@@ -1157,28 +845,26 @@ export default function AdminDashboardPage() {
                             </Label>
                           </div>
 
-                          {/* Map Legend */}
                           <div>
                             <Label className="text-sm font-medium mb-2 block">
                               Legend
                             </Label>
                             <div className="space-y-2">
                               <div className="flex items-center space-x-2">
-                                <div className="w-4 h-4 bg-green-500 rounded-full"></div>
+                                <div className="w-4 h-4 bg-green-500 rounded-full" />
                                 <span className="text-sm">Paid Bills</span>
                               </div>
                               <div className="flex items-center space-x-2">
-                                <div className="w-4 h-4 bg-yellow-500 rounded-full"></div>
+                                <div className="w-4 h-4 bg-yellow-500 rounded-full" />
                                 <span className="text-sm">Due for Payment</span>
                               </div>
                               <div className="flex items-center space-x-2">
-                                <div className="w-4 h-4 bg-red-500 rounded-full"></div>
+                                <div className="w-4 h-4 bg-red-500 rounded-full" />
                                 <span className="text-sm">Overdue Bills</span>
                               </div>
                             </div>
                           </div>
 
-                          {/* LGA List */}
                           <div>
                             <Label className="text-sm font-medium mb-2 block">
                               {stateInfo.name === "FEDERAL CAPITAL TERRITORY"
@@ -1186,26 +872,41 @@ export default function AdminDashboardPage() {
                                 : "Local Government Areas"}
                             </Label>
                             <div className="max-h-40 overflow-y-auto space-y-1">
-                              {getCurrentStateLGAs().map((lga) => (
-                                <div
-                                  key={lga.name}
-                                  className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                                  onClick={() => {
-                                    setMapCenter(lga.center);
-                                    setMapZoom(14);
-                                  }}
-                                >
+                              {getCurrentStateLGAs().map(
+                                (lga: {
+                                  name: string;
+                                  center: any;
+                                  color: string;
+                                }) => (
                                   <div
-                                    className="w-3 h-3 rounded-full"
-                                    style={{ backgroundColor: lga.color }}
-                                  ></div>
-                                  <span className="text-sm">{lga.name}</span>
-                                </div>
-                              ))}
+                                    key={lga.name}
+                                    className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                                    onClick={() => {
+                                      const center = lga.center;
+                                      if (center) {
+                                        if (Array.isArray(center)) {
+                                          setMapCenter({
+                                            lat: center[0],
+                                            lng: center[1],
+                                          });
+                                        } else {
+                                          setMapCenter(center);
+                                        }
+                                      }
+                                      setMapZoom(14);
+                                    }}
+                                  >
+                                    <div
+                                      className="w-3 h-3 rounded-full"
+                                      style={{ backgroundColor: lga.color }}
+                                    />
+                                    <span className="text-sm">{lga.name}</span>
+                                  </div>
+                                ),
+                              )}
                             </div>
                           </div>
 
-                          {/* Statistics */}
                           <div>
                             <Label className="text-sm font-medium mb-2 block">
                               Statistics
@@ -1249,7 +950,6 @@ export default function AdminDashboardPage() {
                             </div>
                           </div>
 
-                          {/* Zoom Controls */}
                           <div>
                             <Label className="text-sm font-medium mb-2 block">
                               Zoom Level
@@ -1281,12 +981,10 @@ export default function AdminDashboardPage() {
                             </div>
                           </div>
 
-                          {/* Reset View */}
                           <Button
                             variant="outline"
                             className="w-full bg-transparent"
                             onClick={() => {
-                              // Reset to current state's center
                               if (currentUser?.stateCode) {
                                 const center =
                                   STATE_MAP_CENTERS[currentUser.stateCode] ||
@@ -1294,7 +992,14 @@ export default function AdminDashboardPage() {
                                     currentUser.stateCode.toUpperCase()
                                   ];
                                 if (center) {
-                                  setMapCenter(center);
+                                  if (Array.isArray(center)) {
+                                    setMapCenter({
+                                      lat: center[0],
+                                      lng: center[1],
+                                    });
+                                  } else {
+                                    setMapCenter(center);
+                                  }
                                 }
                               }
                               setMapZoom(10);
@@ -1308,7 +1013,6 @@ export default function AdminDashboardPage() {
                     </div>
                   )}
 
-                  {/* Map Display */}
                   <div
                     className={isFullscreen ? "col-span-1" : "lg:col-span-3"}
                   >
@@ -1343,20 +1047,18 @@ export default function AdminDashboardPage() {
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
-                        {/* Enhanced Map Container */}
                         <div
-                          className={`relative w-full bg-gray-100 rounded-lg border overflow-hidden ${isFullscreen ? "h-[80vh]" : "h-[600px]"}`}
+                          className={`relative w-full bg-gray-100 rounded-lg border overflow-hidden ${
+                            isFullscreen ? "h-[80vh]" : "h-[600px]"
+                          }`}
                         >
-                          {/* Google Maps Embed */}
                           <iframe
                             className="absolute inset-0 w-full h-full"
                             loading="lazy"
                             allowFullScreen
                             referrerPolicy="no-referrer-when-downgrade"
                             src={`https://www.google.com/maps/embed/v1/view?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8&center=${mapCenter.lat},${mapCenter.lng}&zoom=${mapZoom}&maptype=roadmap`}
-                          ></iframe>
-
-                          {/* Enhanced Map Controls Overlay */}
+                          />
                           <div className="absolute top-4 right-4 flex flex-col space-y-2">
                             <Button
                               variant="outline"
@@ -1373,12 +1075,17 @@ export default function AdminDashboardPage() {
                               <Filter className="w-4 h-4" />
                             </Button>
                           </div>
-
-                          {/* Enhanced Coordinates Display */}
                           <div className="absolute bottom-4 left-4 bg-white/95 rounded-lg px-4 py-3 text-xs shadow-lg border">
                             <div className="font-semibold text-gray-700">
-                              📍 {mapCenter.lat.toFixed(4)}°N,{" "}
-                              {mapCenter.lng.toFixed(4)}°E
+                              📍{" "}
+                              {mapCenter && typeof mapCenter.lat === "number"
+                                ? mapCenter.lat.toFixed(4)
+                                : "N/A"}
+                              °N,{" "}
+                              {mapCenter && typeof mapCenter.lng === "number"
+                                ? mapCenter.lng.toFixed(4)
+                                : "N/A"}
+                              °E
                             </div>
                             <div className="text-gray-600 mt-1">
                               🔍 Zoom: {mapZoom}x | Scale: 1:
@@ -1388,8 +1095,6 @@ export default function AdminDashboardPage() {
                               🗺️ {stateInfo.name} State Coverage Area
                             </div>
                           </div>
-
-                          {/* Enhanced Compass with better styling */}
                           <div className="absolute top-4 left-4 bg-white/95 rounded-full p-3 shadow-lg border">
                             <div className="w-10 h-10 relative">
                               <div className="absolute inset-0 flex items-center justify-center">
@@ -1397,18 +1102,16 @@ export default function AdminDashboardPage() {
                                   N
                                 </span>
                               </div>
-                              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-3 border-r-3 border-b-6 border-transparent border-b-red-600"></div>
-                              <div className="absolute inset-0 border-2 border-gray-300 rounded-full"></div>
+                              <div className="absolute inset-0 border-2 border-gray-300 rounded-full" />
                             </div>
                           </div>
                         </div>
 
-                        {/* Map Summary */}
                         <div className="mt-4 grid grid-cols-3 gap-4">
                           <Card>
                             <CardContent className="p-4">
                               <div className="flex items-center space-x-2">
-                                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                                <div className="w-3 h-3 bg-green-500 rounded-full" />
                                 <div>
                                   <p className="text-sm font-medium">
                                     Paid Properties
@@ -1426,7 +1129,7 @@ export default function AdminDashboardPage() {
                           <Card>
                             <CardContent className="p-4">
                               <div className="flex items-center space-x-2">
-                                <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                                <div className="w-3 h-3 bg-yellow-500 rounded-full" />
                                 <div>
                                   <p className="text-sm font-medium">
                                     Due for Payment
@@ -1445,7 +1148,7 @@ export default function AdminDashboardPage() {
                           <Card>
                             <CardContent className="p-4">
                               <div className="flex items-center space-x-2">
-                                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                                <div className="w-3 h-3 bg-red-500 rounded-full" />
                                 <div>
                                   <p className="text-sm font-medium">
                                     Overdue Bills
@@ -1468,8 +1171,8 @@ export default function AdminDashboardPage() {
                 </div>
               </TabsContent>
 
+              {/* ── Bills ── */}
               <TabsContent value="bills" className="mt-6">
-                {/* Monthly Bill Generation Section */}
                 <Card className="mb-6">
                   <CardHeader>
                     <CardTitle className="flex items-center">
@@ -1520,7 +1223,6 @@ export default function AdminDashboardPage() {
                         </p>
                       </div>
                     </div>
-
                     <div className="space-y-4">
                       <Alert className="border-orange-600 bg-orange-50">
                         <AlertCircle className="h-4 w-4 text-orange-600" />
@@ -1530,7 +1232,6 @@ export default function AdminDashboardPage() {
                           already have a bill for the current month.
                         </AlertDescription>
                       </Alert>
-
                       <Button
                         className="w-full"
                         size="lg"
@@ -1539,20 +1240,15 @@ export default function AdminDashboardPage() {
                             !confirm(
                               `Generate monthly bills for ${addresses.length} active bins in ${stateInfo.name}?\n\nBill Amount: ₦${(stats.averageBill || 1500).toLocaleString()} per bin\nExpected Revenue: ₦${((stats.averageBill || 1500) * addresses.length).toLocaleString()}`,
                             )
-                          ) {
+                          )
                             return;
-                          }
-
                           try {
                             const data = await adminApi.generateMonthlyBills();
                             alert(
                               `Bills Generated!\n\n✅ Generated: ${data.generated}\n⏭️ Skipped: ${data.skipped}\n❌ Errors: ${data.errors?.length || 0}`,
                             );
-
-                            // Reload bills
-                            if (currentUser?.stateCode) {
+                            if (currentUser?.stateCode)
                               await loadBills(currentUser.stateCode);
-                            }
                           } catch (error) {
                             console.error("Failed to generate bills:", error);
                             alert(
@@ -1564,7 +1260,6 @@ export default function AdminDashboardPage() {
                         <Calendar className="w-5 h-5 mr-2" />
                         Generate Monthly Bills
                       </Button>
-
                       <div className="text-xs text-gray-500">
                         <p>
                           • Bills will only be generated for bins that are
@@ -1591,7 +1286,6 @@ export default function AdminDashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {/* Search and Filter */}
                       <div className="flex flex-col md:flex-row gap-4">
                         <div className="flex-1">
                           <div className="relative">
@@ -1673,7 +1367,7 @@ export default function AdminDashboardPage() {
                               <TableHead className="w-[100px]">
                                 Bill ID
                               </TableHead>
-                              <TableHead>Bin & Address</TableHead>
+                              <TableHead>Bin &amp; Address</TableHead>
                               <TableHead>Customer</TableHead>
                               <TableHead>Amount</TableHead>
                               <TableHead>Due Date</TableHead>
@@ -1735,7 +1429,7 @@ export default function AdminDashboardPage() {
                                       bill.status.slice(1)}
                                   </Badge>
                                 </TableCell>
-                                <TableCell className="text-right">
+                                <TableCell className="text-right relative">
                                   <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button
@@ -1752,40 +1446,14 @@ export default function AdminDashboardPage() {
                                       <DropdownMenuLabel>
                                         Actions
                                       </DropdownMenuLabel>
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          setSelectedBill(bill);
-                                          setShowBillDetails(true);
-                                        }}
-                                      >
-                                        <Eye className="mr-2 h-4 w-4" />
-                                        View Details
+                                      <DropdownMenuItem>
+                                        <Eye className="mr-2 h-4 w-4" /> View
+                                        Details
                                       </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          // TODO: Implement edit functionality
-                                          toast({
-                                            title: "Edit Bill",
-                                            description:
-                                              "Edit functionality coming soon",
-                                          });
-                                        }}
-                                      >
-                                        <Edit className="mr-2 h-4 w-4" />
-                                        Edit Bill
+                                      <DropdownMenuItem>
+                                        <Edit className="mr-2 h-4 w-4" /> Edit
+                                        Bill
                                       </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          window.open(
-                                            `${process.env.NEXT_PUBLIC_API_URL?.replace("/api", "") || "http://localhost:5000"}/api/bills/${bill.id}/download`,
-                                            "_blank",
-                                          );
-                                        }}
-                                      >
-                                        <Download className="mr-2 h-4 w-4" />
-                                        Download
-                                      </DropdownMenuItem>
-
                                       {bill.status === "overdue" && (
                                         <>
                                           <DropdownMenuSeparator />
@@ -1801,12 +1469,12 @@ export default function AdminDashboardPage() {
                                             {isNotificationSending ===
                                             bill.id ? (
                                               <>
-                                                <Clock className="mr-2 h-4 w-4 animate-spin" />
+                                                <Clock className="mr-2 h-4 w-4 animate-spin" />{" "}
                                                 Sending...
                                               </>
                                             ) : (
                                               <>
-                                                <Bell className="mr-2 h-4 w-4" />
+                                                <Bell className="mr-2 h-4 w-4" />{" "}
                                                 Send Overdue Notice
                                               </>
                                             )}
@@ -1820,20 +1488,18 @@ export default function AdminDashboardPage() {
                                             }
                                             className="text-blue-600 focus:text-blue-700"
                                           >
-                                            <MessageSquare className="mr-2 h-4 w-4" />
+                                            <MessageSquare className="mr-2 h-4 w-4" />{" "}
                                             Send SMS Reminder
                                           </DropdownMenuItem>
                                         </>
                                       )}
-
                                       <DropdownMenuSeparator />
                                       <DropdownMenuItem className="text-red-600">
-                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        <Trash2 className="mr-2 h-4 w-4" />{" "}
                                         Delete Bill
                                       </DropdownMenuItem>
                                     </DropdownMenuContent>
                                   </DropdownMenu>
-
                                   {notificationSuccess === bill.id && (
                                     <div className="absolute right-0 top-0 -mt-2 -mr-2">
                                       <div className="bg-green-500 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
@@ -1849,7 +1515,7 @@ export default function AdminDashboardPage() {
                         </Table>
                       </div>
 
-                      {/* Pagination */}
+                      {/* Bills Pagination */}
                       <Pagination>
                         <PaginationContent>
                           <PaginationItem>
@@ -1906,6 +1572,7 @@ export default function AdminDashboardPage() {
                 </Card>
               </TabsContent>
 
+              {/* ── Payments ── */}
               <TabsContent value="payments" className="mt-6">
                 <Card>
                   <CardHeader>
@@ -1916,7 +1583,6 @@ export default function AdminDashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {/* Search and Filter */}
                       <div className="flex flex-col md:flex-row gap-4">
                         <div className="flex-1">
                           <div className="relative">
@@ -1955,7 +1621,6 @@ export default function AdminDashboardPage() {
                         </Button>
                       </div>
 
-                      {/* Payments Table */}
                       <div className="rounded-md border">
                         <Table>
                           <TableHeader>
@@ -1963,7 +1628,7 @@ export default function AdminDashboardPage() {
                               <TableHead className="w-[100px]">
                                 Payment ID
                               </TableHead>
-                              <TableHead>Bin & Address</TableHead>
+                              <TableHead>Bin &amp; Address</TableHead>
                               <TableHead>Customer</TableHead>
                               <TableHead>Amount</TableHead>
                               <TableHead>Date</TableHead>
@@ -2042,15 +1707,15 @@ export default function AdminDashboardPage() {
                                         Actions
                                       </DropdownMenuLabel>
                                       <DropdownMenuItem>
-                                        <Eye className="mr-2 h-4 w-4" />
-                                        View Details
+                                        <Eye className="mr-2 h-4 w-4" /> View
+                                        Details
                                       </DropdownMenuItem>
                                       <DropdownMenuItem>
-                                        <Download className="mr-2 h-4 w-4" />
+                                        <Download className="mr-2 h-4 w-4" />{" "}
                                         Download Receipt
                                       </DropdownMenuItem>
                                       <DropdownMenuItem>
-                                        <Printer className="mr-2 h-4 w-4" />
+                                        <Printer className="mr-2 h-4 w-4" />{" "}
                                         Print Receipt
                                       </DropdownMenuItem>
                                     </DropdownMenuContent>
@@ -2062,7 +1727,6 @@ export default function AdminDashboardPage() {
                         </Table>
                       </div>
 
-                      {/* Pagination */}
                       <Pagination>
                         <PaginationContent>
                           <PaginationItem>
@@ -2119,6 +1783,7 @@ export default function AdminDashboardPage() {
                 </Card>
               </TabsContent>
 
+              {/* ── Registered Addresses ── */}
               <TabsContent value="users" className="mt-6">
                 <Card>
                   <CardHeader>
@@ -2130,7 +1795,6 @@ export default function AdminDashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {/* Search and Filter */}
                       <div className="flex flex-col md:flex-row gap-4">
                         <div className="flex-1">
                           <div className="relative">
@@ -2166,7 +1830,6 @@ export default function AdminDashboardPage() {
                         </Button>
                       </div>
 
-                      {/* Addresses Table */}
                       <div className="rounded-md border">
                         <Table>
                           <TableHeader>
@@ -2281,8 +1944,8 @@ export default function AdminDashboardPage() {
                                             setShowAddressDetails(true);
                                           }}
                                         >
-                                          <Eye className="mr-2 h-4 w-4" />
-                                          View Details
+                                          <Eye className="mr-2 h-4 w-4" /> View
+                                          Details
                                         </DropdownMenuItem>
                                         <DropdownMenuItem
                                           onClick={() => {
@@ -2297,9 +1960,48 @@ export default function AdminDashboardPage() {
                                             setShowAddressDetails(true);
                                           }}
                                         >
-                                          <Edit className="mr-2 h-4 w-4" />
-                                          Edit Address
+                                          <Edit className="mr-2 h-4 w-4" /> Edit
+                                          Address
                                         </DropdownMenuItem>
+                                        {address.status === "PENDING" && (
+                                          <>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                              onClick={async () => {
+                                                await adminApi.approveAddress(
+                                                  address._id,
+                                                );
+                                                toast({
+                                                  title: "Address Approved",
+                                                  description: `Address ${address.address} has been approved.`,
+                                                  variant: "default",
+                                                });
+                                                await loadAddresses();
+                                              }}
+                                              className="text-green-600 focus:text-green-700"
+                                            >
+                                              <CheckCircle className="mr-2 h-4 w-4" />{" "}
+                                              Approve
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={async () => {
+                                                await adminApi.rejectAddress(
+                                                  address._id,
+                                                );
+                                                toast({
+                                                  title: "Address Rejected",
+                                                  description: `Address ${address.address} has been rejected.`,
+                                                  variant: "destructive",
+                                                });
+                                                await loadAddresses();
+                                              }}
+                                              className="text-red-600 focus:text-red-700"
+                                            >
+                                              <X className="mr-2 h-4 w-4" />{" "}
+                                              Reject
+                                            </DropdownMenuItem>
+                                          </>
+                                        )}
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                           onClick={async () => {
@@ -2309,7 +2011,6 @@ export default function AdminDashboardPage() {
                                               )
                                             ) {
                                               try {
-                                                // Add API call to toggle address status
                                                 toast({
                                                   title: address.isActive
                                                     ? "Address Deactivated"
@@ -2330,12 +2031,12 @@ export default function AdminDashboardPage() {
                                         >
                                           {address.isActive ? (
                                             <>
-                                              <Clock className="mr-2 h-4 w-4" />
+                                              <Clock className="mr-2 h-4 w-4" />{" "}
                                               Deactivate
                                             </>
                                           ) : (
                                             <>
-                                              <CheckCircle className="mr-2 h-4 w-4" />
+                                              <CheckCircle className="mr-2 h-4 w-4" />{" "}
                                               Activate
                                             </>
                                           )}
@@ -2350,7 +2051,7 @@ export default function AdminDashboardPage() {
                         </Table>
                       </div>
 
-                      {/* Pagination */}
+                      {/* Addresses Pagination */}
                       <Pagination>
                         <PaginationContent>
                           <PaginationItem>
@@ -2411,9 +2112,7 @@ export default function AdminDashboardPage() {
                   open={showAddressDetails}
                   onOpenChange={(open) => {
                     setShowAddressDetails(open);
-                    if (!open) {
-                      setIsEditingAddress(false);
-                    }
+                    if (!open) setIsEditingAddress(false);
                   }}
                 >
                   <DialogContent className="max-w-2xl">
@@ -2584,9 +2283,9 @@ export default function AdminDashboardPage() {
                 </Dialog>
               </TabsContent>
 
+              {/* ── Reports ── */}
               <TabsContent value="reports" className="mt-6">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Available Reports */}
                   <div className="lg:col-span-1">
                     <Card className="h-full">
                       <CardHeader>
@@ -2620,7 +2319,6 @@ export default function AdminDashboardPage() {
                               </SelectContent>
                             </Select>
                           </div>
-
                           <div className="space-y-2">
                             {filteredReports.map((report) => (
                               <div
@@ -2649,7 +2347,6 @@ export default function AdminDashboardPage() {
                               </div>
                             ))}
                           </div>
-
                           <div className="pt-4">
                             <Button className="w-full">
                               <Plus className="w-4 h-4 mr-2" />
@@ -2661,7 +2358,6 @@ export default function AdminDashboardPage() {
                     </Card>
                   </div>
 
-                  {/* Report Preview */}
                   <div className="lg:col-span-2">
                     <Card className="h-full">
                       <CardHeader>
@@ -2694,18 +2390,14 @@ export default function AdminDashboardPage() {
                               </div>
                               <div className="flex space-x-2">
                                 <Button variant="outline" size="sm">
-                                  <Printer className="w-4 h-4 mr-2" />
-                                  Print
+                                  <Printer className="w-4 h-4 mr-2" /> Print
                                 </Button>
                                 <Button size="sm">
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download
+                                  <Download className="w-4 h-4 mr-2" /> Download
                                 </Button>
                               </div>
                             </div>
-
                             <div className="border rounded-lg p-4">
-                              {/* Sample report content based on type */}
                               {(() => {
                                 const report = reportsData.find(
                                   (r) => r.id === selectedReport,
@@ -2726,35 +2418,28 @@ export default function AdminDashboardPage() {
                                         <div className="grid grid-cols-2 gap-4">
                                           <Card>
                                             <CardContent className="p-4">
-                                              <div className="flex items-center justify-between">
-                                                <p className="text-sm text-gray-600">
-                                                  Total Revenue
-                                                </p>
-                                                <p className="text-lg font-bold">
-                                                  ₦4,560,000
-                                                </p>
-                                              </div>
+                                              <p className="text-sm text-gray-600">
+                                                Total Revenue
+                                              </p>
+                                              <p className="text-lg font-bold">
+                                                ₦4,560,000
+                                              </p>
                                             </CardContent>
                                           </Card>
                                           <Card>
                                             <CardContent className="p-4">
-                                              <div className="flex items-center justify-between">
-                                                <p className="text-sm text-gray-600">
-                                                  Collection Rate
-                                                </p>
-                                                <p className="text-lg font-bold">
-                                                  87%
-                                                </p>
-                                              </div>
+                                              <p className="text-sm text-gray-600">
+                                                Collection Rate
+                                              </p>
+                                              <p className="text-lg font-bold">
+                                                87%
+                                              </p>
                                             </CardContent>
                                           </Card>
                                         </div>
                                         <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">
                                           <BarChart4 className="h-12 w-12 text-gray-400" />
                                         </div>
-                                        <p className="text-sm text-gray-600">
-                                          Monthly revenue breakdown chart
-                                        </p>
                                       </div>
                                     );
                                   case "analytics":
@@ -2836,39 +2521,33 @@ export default function AdminDashboardPage() {
                                         </div>
                                         <div className="grid grid-cols-3 gap-4">
                                           <Card>
-                                            <CardContent className="p-4">
-                                              <div className="flex flex-col items-center">
-                                                <p className="text-sm text-gray-600">
-                                                  Total Bills
-                                                </p>
-                                                <p className="text-2xl font-bold">
-                                                  8,934
-                                                </p>
-                                              </div>
+                                            <CardContent className="p-4 flex flex-col items-center">
+                                              <p className="text-sm text-gray-600">
+                                                Total Bills
+                                              </p>
+                                              <p className="text-2xl font-bold">
+                                                8,934
+                                              </p>
                                             </CardContent>
                                           </Card>
                                           <Card>
-                                            <CardContent className="p-4">
-                                              <div className="flex flex-col items-center">
-                                                <p className="text-sm text-gray-600">
-                                                  Overdue
-                                                </p>
-                                                <p className="text-2xl font-bold text-red-600">
-                                                  234
-                                                </p>
-                                              </div>
+                                            <CardContent className="p-4 flex flex-col items-center">
+                                              <p className="text-sm text-gray-600">
+                                                Overdue
+                                              </p>
+                                              <p className="text-2xl font-bold text-red-600">
+                                                234
+                                              </p>
                                             </CardContent>
                                           </Card>
                                           <Card>
-                                            <CardContent className="p-4">
-                                              <div className="flex flex-col items-center">
-                                                <p className="text-sm text-gray-600">
-                                                  Paid
-                                                </p>
-                                                <p className="text-2xl font-bold text-green-600">
-                                                  7,823
-                                                </p>
-                                              </div>
+                                            <CardContent className="p-4 flex flex-col items-center">
+                                              <p className="text-sm text-gray-600">
+                                                Paid
+                                              </p>
+                                              <p className="text-2xl font-bold text-green-600">
+                                                7,823
+                                              </p>
                                             </CardContent>
                                           </Card>
                                         </div>
@@ -2946,6 +2625,7 @@ export default function AdminDashboardPage() {
                 </div>
               </TabsContent>
 
+              {/* ── Settings ── */}
               <TabsContent value="settings" className="mt-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <Card>
@@ -2971,7 +2651,6 @@ export default function AdminDashboardPage() {
                           Per bin, per month
                         </p>
                       </div>
-
                       <div className="space-y-2">
                         <Label htmlFor="newBillAmount">
                           New Monthly Amount (₦)
@@ -2988,7 +2667,6 @@ export default function AdminDashboardPage() {
                           update. Existing unpaid bills remain unchanged.
                         </p>
                       </div>
-
                       <Button
                         className="w-full"
                         onClick={async () => {
@@ -2996,18 +2674,15 @@ export default function AdminDashboardPage() {
                             "newBillAmount",
                           ) as HTMLInputElement;
                           const newAmount = parseFloat(input.value);
-
                           if (!newAmount || newAmount < 0) {
                             alert("Please enter a valid amount");
                             return;
                           }
-
                           try {
                             await adminApi.updateMonthlyBillAmount(newAmount);
                             alert(
                               `Monthly bill amount updated to ₦${newAmount.toLocaleString()}`,
                             );
-                            // Reload stats
                             if (currentUser?.stateCode) {
                               const statsResponse =
                                 await adminApi.getStateStats(
@@ -3029,7 +2704,6 @@ export default function AdminDashboardPage() {
                       >
                         Update Monthly Amount
                       </Button>
-
                       <div className="pt-4 border-t">
                         <h4 className="font-medium text-sm mb-2">Impact</h4>
                         <ul className="text-sm text-gray-600 space-y-1">
@@ -3148,7 +2822,7 @@ export default function AdminDashboardPage() {
                         NIGERIAN_STATES[currentUser.stateCode.toLowerCase()] ? (
                           NIGERIAN_STATES[
                             currentUser.stateCode.toLowerCase()
-                          ].lgas.map((lga) => (
+                          ].lgas.map((lga: string) => (
                             <SelectItem key={lga} value={lga}>
                               {lga}
                             </SelectItem>
@@ -3161,7 +2835,6 @@ export default function AdminDashboardPage() {
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Address *</label>
                     <Textarea
@@ -3176,7 +2849,6 @@ export default function AdminDashboardPage() {
                       rows={3}
                     />
                   </div>
-
                   <div className="space-y-2">
                     <label className="text-sm font-medium">
                       Customer Reference (Optional)
@@ -3192,7 +2864,6 @@ export default function AdminDashboardPage() {
                       }
                     />
                   </div>
-
                   <DialogFooter>
                     <Button
                       variant="outline"
