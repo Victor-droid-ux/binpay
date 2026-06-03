@@ -10,7 +10,7 @@
 
 ### 1.1 Connect to your InterServer VPS
 ```bash
-ssh username@your-server-ip
+ssh root@163.245.218.113
 ```
 
 ### 1.2 Update system packages

@@ -1,15 +1,15 @@
-# BinPay Deployment - Your Server: 163.245.201.188
+# BinPay Deployment - Your Server: 163.245.218.113
 
 ## Your Server Details
-- **IP Address:** 163.245.201.188
-- **SSH Command:** `ssh root@163.245.201.188`
+- **IP Address:** 163.245.218.113
+- **SSH Command:** `ssh root@163.245.218.113`
 
 ## Step-by-Step Commands for YOUR Server
 
 ### 1. Connect to Your Server
 Open PowerShell or CMD on your Windows machine:
 ```bash
-ssh root@163.245.201.188
+ssh root@163.245.218.113
 ```
 Enter your password when prompted.
 
@@ -61,7 +61,7 @@ cd binpay
 2. Open WinSCP
 3. New Site:
    - File protocol: SFTP
-   - Host name: `163.245.201.188`
+   - Host name: `163.245.218.113`
    - Port: 22
    - User name: `root`
    - Password: (your server password)
@@ -87,7 +87,7 @@ git clone YOUR_REPO_URL .
 1. Go to https://cloud.mongodb.com/
 2. Create free account and cluster
 3. In "Network Access", click "Add IP Address"
-4. Add your server IP: **163.245.201.188**
+4. Add your server IP: **163.245.218.113**
 5. Also add **0.0.0.0/0** (allow from anywhere) for testing
 6. In "Database Access", create a user (remember username/password)
 7. Click "Connect" → "Connect your application"
@@ -109,7 +109,7 @@ Paste this (replace the marked values):
 ```env
 NODE_ENV=production
 PORT=5000
-API_URL=http://163.245.201.188:5000
+API_URL=http://163.245.218.113:5000
 
 # Replace with YOUR MongoDB Atlas connection string
 MONGODB_URI=mongodb+srv://YOUR_USERNAME:YOUR_PASSWORD@cluster0.xxxxx.mongodb.net/binpay?retryWrites=true&w=majority
@@ -125,7 +125,7 @@ PAYSTACK_SECRET_KEY=sk_live_YOUR_SECRET_KEY_HERE
 PAYSTACK_PUBLIC_KEY=pk_live_YOUR_PUBLIC_KEY_HERE
 PAYSTACK_WEBHOOK_SECRET=your_webhook_secret
 
-FRONTEND_URL=http://163.245.201.188:3000
+FRONTEND_URL=http://163.245.218.113:3000
 
 SUPER_ADMIN_EMAIL=admin@binpay.ng
 SUPER_ADMIN_PASSWORD=Admin123456!
@@ -144,7 +144,7 @@ nano .env.production
 
 Paste this:
 ```env
-NEXT_PUBLIC_API_URL=http://163.245.201.188:5000/api
+NEXT_PUBLIC_API_URL=http://163.245.218.113:5000/api
 ```
 
 **Save:** Press `Ctrl+X`, then `Y`, then `Enter`
@@ -204,8 +204,8 @@ ufw --force enable
 
 ### 10. Access Your Application
 
-**Frontend:** http://163.245.201.188:3000
-**Backend API:** http://163.245.201.188:5000/api/health
+**Frontend:** http://163.245.218.113:3000
+**Backend API:** http://163.245.218.113:5000/api/health
 
 **Super Admin Login:**
 - Email: admin@binpay.ng
@@ -252,9 +252,9 @@ pm2 start all
 ### If you have a domain (e.g., binpay.ng):
 
 1. **Point your domain DNS to your server:**
-   - A record: `binpay.ng` → 163.245.201.188
-   - A record: `www.binpay.ng` → 163.245.201.188
-   - A record: `api.binpay.ng` → 163.245.201.188
+   - A record: `binpay.ng` → 163.245.218.113
+   - A record: `www.binpay.ng` → 163.245.218.113
+   - A record: `api.binpay.ng` → 163.245.218.113
 
 2. **Update environment files:**
    ```bash
@@ -340,7 +340,7 @@ netstat -tlnp | grep -E '3000|5000'
 ```
 
 **Database connection error?**
-- Make sure MongoDB Atlas has IP 163.245.201.188 whitelisted
+- Make sure MongoDB Atlas has IP 163.245.218.113 whitelisted
 - Or add 0.0.0.0/0 to allow all IPs
 - Verify connection string in backend/.env
 
@@ -359,10 +359,10 @@ cd /var/www/binpay
 
 ## Your Access URLs
 
-- **Frontend:** http://163.245.201.188:3000
-- **Backend Health:** http://163.245.201.188:5000/api/health
-- **Admin Login:** http://163.245.201.188:3000/admin/login
-- **Super Admin:** http://163.245.201.188:3000/super-admin/login
+- **Frontend:** http://163.245.218.113:3000
+- **Backend Health:** http://163.245.218.113:5000/api/health
+- **Admin Login:** http://163.245.218.113:3000/admin/login
+- **Super Admin:** http://163.245.218.113:3000/super-admin/login
 
 ---
 

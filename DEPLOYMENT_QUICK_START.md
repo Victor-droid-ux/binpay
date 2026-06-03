@@ -32,7 +32,7 @@
 
 ### Step 1: Connect to Server
 ```bash
-ssh root@YOUR_SERVER_IP
+ssh root@163.245.218.113
 ```
 
 ### Step 2: Install Requirements (One-Time Setup)
@@ -61,7 +61,7 @@ sudo mkdir binpay
 sudo chown $USER:$USER binpay
 
 # Upload via SFTP using FileZilla or WinSCP:
-# - Host: YOUR_SERVER_IP
+# - Host: 163.245.218.113
 # - Username: root (or your user)
 # - Password: your password
 # - Remote path: /var/www/binpay
