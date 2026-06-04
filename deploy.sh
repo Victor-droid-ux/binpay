@@ -66,7 +66,7 @@ if [ ! -f ".env.production" ]; then
 fi
 
 # Install dependencies
-npm install --production=false
+npm install --production=false --legacy-peer-deps
 if [ $? -ne 0 ]; then
     print_error "Frontend npm install failed"
 fi

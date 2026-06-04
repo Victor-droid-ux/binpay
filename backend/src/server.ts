@@ -17,11 +17,27 @@ import infoRoutes from "./routes/info";
 
 const app: Application = express();
 const PORT = process.env.PORT || 5000;
-const allowedOrigins = [
-  process.env.FRONTEND_URL || "http://localhost:3000",
-  "http://localhost:3000",
-  "http://192.64.84.163:3000",
-].filter((origin, index, arr) => arr.indexOf(origin) === index);
+const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+const allowedOriginsSet = new Set<string>([frontendUrl]);
+
+try {
+  const parsedUrl = new URL(frontendUrl);
+  if (parsedUrl.hostname.startsWith("www.")) {
+    allowedOriginsSet.add(
+      `${parsedUrl.protocol}//${parsedUrl.hostname.replace(/^www\./, "")}`,
+    );
+  } else {
+    allowedOriginsSet.add(`${parsedUrl.protocol}//www.${parsedUrl.hostname}`);
+  }
+} catch {
+  // Keep only configured value if URL parsing fails.
+}
+
+if (process.env.NODE_ENV !== "production") {
+  allowedOriginsSet.add("http://localhost:3000");
+}
+
+const allowedOrigins = Array.from(allowedOriginsSet);
 
 // Middleware
 app.use(helmet());
