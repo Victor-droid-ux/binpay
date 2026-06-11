@@ -32,6 +32,10 @@ export interface IUser extends Document {
   lastLogin?: Date;
   resetCode?: string;
   resetCodeExpiry?: Date;
+  emailVerificationCode?: string;
+  emailVerificationCodeExpiry?: Date;
+  loginOtpCode?: string;
+  loginOtpExpiry?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,6 +71,10 @@ const userSchema = new Schema<IUser>(
     lastLogin: { type: Date },
     resetCode: { type: String },
     resetCodeExpiry: { type: Date },
+    emailVerificationCode: { type: String },
+    emailVerificationCodeExpiry: { type: Date },
+    loginOtpCode: { type: String },
+    loginOtpExpiry: { type: Date },
   },
   {
     timestamps: true,

@@ -1,26 +1,50 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ArrowLeft, Phone, Mail, MapPin, User, AlertCircle } from "lucide-react"
-import Link from "next/link"
-import { Logo } from "@/components/logo"
-import { NIGERIAN_STATES } from "@/lib/states-data"
-import { authApi, ApiError } from "@/lib/api"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Mail,
+  MapPin,
+  Phone,
+  RefreshCcw,
+  User,
+  XCircle,
+  AlertCircle,
+} from "lucide-react";
+import Link from "next/link";
+import { Logo } from "@/components/logo";
+import { NIGERIAN_STATES } from "@/lib/states-data";
+import { authApi, ApiError } from "@/lib/api";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function RegisterPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const preSelectedState = searchParams.get("state")
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const preSelectedState = searchParams.get("state");
+  const verificationMode = searchParams.get("verifyEmail") === "1";
+  const verificationEmailFromQuery = searchParams.get("email") || "";
 
-  const [step, setStep] = useState(1)
+  const [step, setStep] = useState(verificationMode ? 2 : 1);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -32,79 +56,129 @@ export default function RegisterPage() {
     password: "",
     confirmPassword: "",
     agreeToTerms: false,
-  })
-  const [otp, setOtp] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState(
+    verificationEmailFromQuery,
+  );
+  const [isResending, setIsResending] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [didAutoResend, setDidAutoResend] = useState(false);
+
+  const passwordChecks = {
+    minLength: formData.password.length >= 8,
+    uppercase: /[A-Z]/.test(formData.password),
+    lowercase: /[a-z]/.test(formData.password),
+    number: /\d/.test(formData.password),
+    special: /[^A-Za-z0-9]/.test(formData.password),
+  };
+
+  const allPasswordChecksPass = Object.values(passwordChecks).every(Boolean);
+
+  useEffect(() => {
+    const autoResendVerificationCode = async () => {
+      if (!verificationMode || !verificationEmailFromQuery || didAutoResend) {
+        return;
+      }
+
+      setDidAutoResend(true);
+      setIsResending(true);
+      setError(null);
+
+      try {
+        await authApi.resendVerification({ email: verificationEmailFromQuery });
+        setSuccessMessage(
+          "We sent a fresh verification code to your email. Enter it below.",
+        );
+      } catch (err) {
+        if (err instanceof ApiError) {
+          setError(err.message);
+        } else {
+          setError("Unable to resend code right now. Please try again.");
+        }
+      } finally {
+        setIsResending(false);
+      }
+    };
+
+    autoResendVerificationCode();
+  }, [didAutoResend, verificationEmailFromQuery, verificationMode]);
 
   const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
-    if (error) setError(null)
-  }
+    if (error) setError(null);
+    if (successMessage) setSuccessMessage(null);
+  };
 
-  const selectedStateData = formData.state ? NIGERIAN_STATES[formData.state] : null
+  const selectedStateData = formData.state
+    ? NIGERIAN_STATES[formData.state]
+    : null;
 
   const validateForm = () => {
     if (!formData.firstName.trim()) {
-      setError("First name is required")
-      return false
+      setError("First name is required");
+      return false;
     }
     if (!formData.lastName.trim()) {
-      setError("Last name is required")
-      return false
+      setError("Last name is required");
+      return false;
     }
     if (!formData.email.trim()) {
-      setError("Email is required")
-      return false
+      setError("Email is required");
+      return false;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      setError("Please enter a valid email address")
-      return false
+      setError("Please enter a valid email address");
+      return false;
     }
     if (!formData.phone.trim()) {
-      setError("Phone number is required")
-      return false
+      setError("Phone number is required");
+      return false;
     }
     if (!/^\+?[1-9]\d{1,14}$/.test(formData.phone.replace(/\s/g, ""))) {
-      setError("Please enter a valid phone number (e.g., +2348012345678)")
-      return false
+      setError("Please enter a valid phone number (e.g., +2348012345678)");
+      return false;
     }
     if (!formData.state) {
-      setError("Please select your state")
-      return false
+      setError("Please select your state");
+      return false;
     }
     if (!formData.password) {
-      setError("Password is required")
-      return false
+      setError("Password is required");
+      return false;
     }
-    if (formData.password.length < 8) {
-      setError("Password must be at least 8 characters")
-      return false
+    if (!allPasswordChecksPass) {
+      setError(
+        "Password must be at least 8 characters and include uppercase, lowercase, number, and special character",
+      );
+      return false;
     }
     if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match")
-      return false
+      setError("Passwords do not match");
+      return false;
     }
     if (!formData.agreeToTerms) {
-      setError("You must agree to the Terms of Service and Privacy Policy")
-      return false
+      setError("You must agree to the Terms of Service and Privacy Policy");
+      return false;
     }
-    return true
-  }
+    return true;
+  };
 
-  const handleSendOTP = async () => {
-    setError(null)
-    
+  const handleRegister = async () => {
+    setError(null);
+
     if (!validateForm()) {
-      return
+      return;
     }
 
-    setIsLoading(true)
+    setIsLoading(true);
 
     try {
       // Register the user with the backend
-      const response = await authApi.register({
+      await authApi.register({
         email: formData.email.trim(),
         phone: formData.phone.replace(/\s/g, ""),
         password: formData.password,
@@ -113,58 +187,117 @@ export default function RegisterPage() {
         stateCode: formData.state,
         lgaId: formData.lga || undefined,
         address: formData.address.trim() || undefined,
-      })
+      });
 
-      // Registration successful - move to success step
-      setStep(3)
+      setVerificationEmail(formData.email.trim());
+      setSuccessMessage("Account created. Enter the code sent to your email.");
+
+      // Registration successful - move to verification step
+      setStep(2);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message)
+        setError(err.message);
       } else {
-        setError("Registration failed. Please try again.")
+        setError("Registration failed. Please try again.");
       }
-      console.error("Registration error:", err)
+      console.error("Registration error:", err);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
-  const handleVerifyOTP = async () => {
-    setError(null)
-    setIsLoading(true)
+  const handleVerifyEmail = async () => {
+    setError(null);
+    setSuccessMessage(null);
+    const emailToVerify = verificationEmail || formData.email.trim();
+
+    if (!emailToVerify) {
+      setError("Email is required to verify your account");
+      return;
+    }
+
+    if (verificationCode.trim().length !== 6) {
+      setError("Enter the 6-digit verification code from your email");
+      return;
+    }
+
+    setIsLoading(true);
 
     try {
-      // TODO: Implement OTP verification when backend supports it
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      setStep(3)
+      await authApi.verifyEmail({
+        email: emailToVerify,
+        verificationCode: verificationCode.trim(),
+      });
+
+      setSuccessMessage("Email verified successfully.");
+      setStep(3);
     } catch (err) {
-      setError("Invalid verification code. Please try again.")
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("Verification failed. Please try again.");
+      }
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
+
+  const handleResendVerification = async () => {
+    setError(null);
+    setSuccessMessage(null);
+    const emailToVerify = verificationEmail || formData.email.trim();
+
+    if (!emailToVerify) {
+      setError("Email is required to resend verification code");
+      return;
+    }
+
+    setIsResending(true);
+
+    try {
+      await authApi.resendVerification({
+        email: emailToVerify,
+      });
+      setSuccessMessage("A new verification code has been sent.");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("Unable to resend code right now. Please try again.");
+      }
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   const handleCompleteRegistration = async () => {
     // Clear tokens (optional - force fresh login)
     // This ensures users go through login flow for better security
-    authApi.logout()
-    
+    authApi.logout();
+
     // Redirect to login page
-    router.push("/login")
-  }
+    router.push("/login");
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center text-green-600 hover:text-green-700 mb-4">
+          <Link
+            href="/"
+            className="inline-flex items-center text-green-600 hover:text-green-700 mb-4"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Home
           </Link>
           <Logo size="md" className="justify-center mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900">Create Your Account</h1>
-          <p className="text-gray-600">Join thousands paying waste bills easily</p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Create Your Account
+          </h1>
+          <p className="text-gray-600">
+            Join thousands paying waste bills easily
+          </p>
           {preSelectedState && selectedStateData && (
             <div className="mt-2 p-2 bg-green-100 rounded-lg">
               <p className="text-sm text-green-800">
@@ -179,23 +312,33 @@ export default function RegisterPage() {
           <div className="flex items-center space-x-2">
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                step >= 1 ? "bg-green-600 text-white" : "bg-gray-200 text-gray-600"
+                step >= 1
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-200 text-gray-600"
               }`}
             >
               1
             </div>
-            <div className={`w-8 h-1 ${step >= 2 ? "bg-green-600" : "bg-gray-200"}`} />
+            <div
+              className={`w-8 h-1 ${step >= 2 ? "bg-green-600" : "bg-gray-200"}`}
+            />
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                step >= 2 ? "bg-green-600 text-white" : "bg-gray-200 text-gray-600"
+                step >= 2
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-200 text-gray-600"
               }`}
             >
               2
             </div>
-            <div className={`w-8 h-1 ${step >= 3 ? "bg-green-600" : "bg-gray-200"}`} />
+            <div
+              className={`w-8 h-1 ${step >= 3 ? "bg-green-600" : "bg-gray-200"}`}
+            />
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                step >= 3 ? "bg-green-600 text-white" : "bg-gray-200 text-gray-600"
+                step >= 3
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-200 text-gray-600"
               }`}
             >
               3
@@ -211,7 +354,9 @@ export default function RegisterPage() {
                 <User className="w-5 h-5 mr-2" />
                 Personal Information
               </CardTitle>
-              <CardDescription>Tell us about yourself to get started</CardDescription>
+              <CardDescription>
+                Tell us about yourself to get started
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Error Alert */}
@@ -221,6 +366,11 @@ export default function RegisterPage() {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
+              {successMessage && (
+                <Alert>
+                  <AlertDescription>{successMessage}</AlertDescription>
+                </Alert>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -228,7 +378,9 @@ export default function RegisterPage() {
                   <Input
                     id="firstName"
                     value={formData.firstName}
-                    onChange={(e) => handleInputChange("firstName", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("firstName", e.target.value)
+                    }
                     placeholder="John"
                   />
                 </div>
@@ -237,7 +389,9 @@ export default function RegisterPage() {
                   <Input
                     id="lastName"
                     value={formData.lastName}
-                    onChange={(e) => handleInputChange("lastName", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("lastName", e.target.value)
+                    }
                     placeholder="Doe"
                   />
                 </div>
@@ -275,13 +429,20 @@ export default function RegisterPage() {
 
               <div>
                 <Label htmlFor="state">State</Label>
-                <Select value={formData.state} onValueChange={(value) => handleInputChange("state", value)}>
+                <Select
+                  value={formData.state}
+                  onValueChange={(value) => handleInputChange("state", value)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select your state" />
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(NIGERIAN_STATES).map(([key, state]) => (
-                      <SelectItem key={key} value={key} disabled={!state.isActive}>
+                      <SelectItem
+                        key={key}
+                        value={key}
+                        disabled={!state.isActive}
+                      >
                         {state.name} {!state.isActive && "(Coming Soon)"}
                       </SelectItem>
                     ))}
@@ -292,13 +453,19 @@ export default function RegisterPage() {
               {selectedStateData && (
                 <div>
                   <Label htmlFor="lga">Local Government Area</Label>
-                  <Select value={formData.lga} onValueChange={(value) => handleInputChange("lga", value)}>
+                  <Select
+                    value={formData.lga}
+                    onValueChange={(value) => handleInputChange("lga", value)}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select your LGA" />
                     </SelectTrigger>
                     <SelectContent>
                       {selectedStateData.lgas.map((lga) => (
-                        <SelectItem key={lga} value={lga.toLowerCase().replace(/\s+/g, "-")}>
+                        <SelectItem
+                          key={lga}
+                          value={lga.toLowerCase().replace(/\s+/g, "-")}
+                        >
                           {lga}
                         </SelectItem>
                       ))}
@@ -315,7 +482,9 @@ export default function RegisterPage() {
                     id="address"
                     className="pl-10"
                     value={formData.address}
-                    onChange={(e) => handleInputChange("address", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("address", e.target.value)
+                    }
                     placeholder="Your full address"
                   />
                 </div>
@@ -328,9 +497,53 @@ export default function RegisterPage() {
                     id="password"
                     type="password"
                     value={formData.password}
-                    onChange={(e) => handleInputChange("password", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("password", e.target.value)
+                    }
                     placeholder="••••••••"
                   />
+                  <div className="mt-2 space-y-1 text-xs text-gray-600">
+                    <div className="flex items-center gap-2">
+                      {passwordChecks.minLength ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5 text-red-500" />
+                      )}
+                      <span>At least 8 characters</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordChecks.uppercase ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5 text-red-500" />
+                      )}
+                      <span>One uppercase letter</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordChecks.lowercase ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5 text-red-500" />
+                      )}
+                      <span>One lowercase letter</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordChecks.number ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5 text-red-500" />
+                      )}
+                      <span>One number</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordChecks.special ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5 text-red-500" />
+                      )}
+                      <span>One special character</span>
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="confirmPassword">Confirm Password</Label>
@@ -338,9 +551,17 @@ export default function RegisterPage() {
                     id="confirmPassword"
                     type="password"
                     value={formData.confirmPassword}
-                    onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("confirmPassword", e.target.value)
+                    }
                     placeholder="••••••••"
                   />
+                  {formData.confirmPassword &&
+                    formData.password !== formData.confirmPassword && (
+                      <p className="mt-2 text-xs text-red-500">
+                        Passwords do not match
+                      </p>
+                    )}
                 </div>
               </div>
 
@@ -348,21 +569,33 @@ export default function RegisterPage() {
                 <Checkbox
                   id="terms"
                   checked={formData.agreeToTerms}
-                  onCheckedChange={(checked) => handleInputChange("agreeToTerms", checked as boolean)}
+                  onCheckedChange={(checked) =>
+                    handleInputChange("agreeToTerms", checked as boolean)
+                  }
                 />
                 <Label htmlFor="terms" className="text-sm">
                   I agree to the{" "}
-                  <Link href="/terms" className="text-green-600 hover:underline">
+                  <Link
+                    href="/terms"
+                    className="text-green-600 hover:underline"
+                  >
                     Terms of Service
                   </Link>{" "}
                   and{" "}
-                  <Link href="/privacy" className="text-green-600 hover:underline">
+                  <Link
+                    href="/privacy"
+                    className="text-green-600 hover:underline"
+                  >
                     Privacy Policy
                   </Link>
                 </Label>
               </div>
 
-              <Button onClick={handleSendOTP} className="w-full" disabled={isLoading}>
+              <Button
+                onClick={handleRegister}
+                className="w-full"
+                disabled={isLoading}
+              >
                 {isLoading ? "Creating Account..." : "Create Account"}
               </Button>
 
@@ -376,38 +609,63 @@ export default function RegisterPage() {
           </Card>
         )}
 
-        {/* Step 2: OTP Verification */}
+        {/* Step 2: Email Verification */}
         {step === 2 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
-                <Phone className="w-5 h-5 mr-2" />
-                Verify Your Phone
+                <Mail className="w-5 h-5 mr-2" />
+                Verify Your Email
               </CardTitle>
-              <CardDescription>We sent a 6-digit code to {formData.phone}</CardDescription>
+              <CardDescription>
+                Enter the 6-digit code sent to{" "}
+                {verificationEmail || formData.email}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {error && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              {successMessage && (
+                <Alert>
+                  <AlertDescription>{successMessage}</AlertDescription>
+                </Alert>
+              )}
+
               <div>
-                <Label htmlFor="otp">Verification Code</Label>
+                <Label htmlFor="verificationCode">Verification Code</Label>
                 <Input
-                  id="otp"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
+                  id="verificationCode"
+                  value={verificationCode}
+                  onChange={(e) =>
+                    setVerificationCode(e.target.value.replace(/\D/g, ""))
+                  }
                   placeholder="123456"
-                  className="text-center text-2xl tracking-widest"
+                  className="text-center tracking-[0.4em]"
                   maxLength={6}
                 />
               </div>
 
-              <Button onClick={handleVerifyOTP} className="w-full" disabled={isLoading || otp.length !== 6}>
-                {isLoading ? "Verifying..." : "Verify Code"}
+              <Button
+                onClick={handleVerifyEmail}
+                className="w-full"
+                disabled={isLoading || verificationCode.length !== 6}
+              >
+                {isLoading ? "Verifying..." : "Verify Email"}
               </Button>
 
-              <div className="text-center">
-                <Button variant="link" className="text-sm">
-                  Didn't receive the code? Resend
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                onClick={handleResendVerification}
+                className="w-full"
+                disabled={isResending}
+              >
+                <RefreshCcw className="h-4 w-4 mr-2" />
+                {isResending ? "Resending..." : "Resend Code"}
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -423,12 +681,17 @@ export default function RegisterPage() {
               </div>
               <CardTitle>Account Created Successfully!</CardTitle>
               <CardDescription>
-                Welcome to Bin-Pay! You can now start paying your waste bills
+                Your email has been verified. You can now start paying your
+                waste bills
                 {selectedStateData && ` in ${selectedStateData.name} state`}.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button onClick={handleCompleteRegistration} className="w-full" disabled={isLoading}>
+              <Button
+                onClick={handleCompleteRegistration}
+                className="w-full"
+                disabled={isLoading}
+              >
                 {isLoading ? "Setting up your account..." : "Go to Dashboard"}
               </Button>
             </CardContent>
@@ -436,5 +699,5 @@ export default function RegisterPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

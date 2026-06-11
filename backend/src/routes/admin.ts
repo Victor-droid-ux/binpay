@@ -290,7 +290,12 @@ router.post(
 
       const user = await User.findById(userId);
       if (!user || !user.stateCode) {
-        return res.status(400).json({ error: "User or state not found" });
+        return res
+          .status(400)
+          .json({
+            error:
+              "⚠️ Unable to load your state's billing profile. Please refresh the page or contact support if the issue persists.",
+          });
       }
 
       const binRegistration = await BinRegistration.findOne({

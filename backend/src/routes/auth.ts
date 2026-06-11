@@ -9,10 +9,51 @@ import {
 } from "../utils/jwt";
 import { validate } from "../middleware/validator";
 import { authenticate, AuthRequest } from "../middleware/auth";
-import { sendPasswordResetEmail } from "../services/email";
-import { sendPasswordResetSMS } from "../services/sms";
+import {
+  sendEmailVerificationCode,
+  sendPasswordResetEmail,
+  sendWelcomeEmail,
+} from "../services/email";
+import { sendPasswordResetSMS, sendSMS } from "../services/sms";
 
 const router = Router();
+const VERIFICATION_CODE_EXPIRY_MS = 15 * 60 * 1000;
+const LOGIN_OTP_EXPIRY_MS = 10 * 60 * 1000;
+const isDevelopment = process.env.NODE_ENV !== "production";
+
+const generateSixDigitCode = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
+
+const buildAuthResponse = (user: any) => {
+  const accessToken = generateAccessToken({
+    userId: user._id.toString(),
+    email: user.email,
+    role: user.role,
+    stateCode: user.stateCode || undefined,
+  });
+
+  const refreshToken = generateRefreshToken({
+    userId: user._id.toString(),
+    email: user.email,
+    role: user.role,
+    stateCode: user.stateCode || undefined,
+  });
+
+  return {
+    message: "Login successful",
+    user: {
+      id: user._id,
+      email: user.email,
+      phone: user.phone,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      stateCode: user.stateCode,
+    },
+    accessToken,
+    refreshToken,
+  };
+};
 
 // Register User
 router.post(
@@ -55,6 +96,10 @@ router.post(
 
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
+      const verificationCode = generateSixDigitCode();
+      const verificationCodeExpiry = new Date(
+        Date.now() + VERIFICATION_CODE_EXPIRY_MS,
+      );
 
       // Create user
       const user = await User.create({
@@ -68,7 +113,20 @@ router.post(
         stateCode: stateCode || undefined,
         lgaId,
         role: "USER",
+        emailVerified: false,
+        emailVerificationCode: verificationCode,
+        emailVerificationCodeExpiry: verificationCodeExpiry,
       });
+
+      const verificationEmailSent = await sendEmailVerificationCode(
+        user.email,
+        verificationCode,
+        user.firstName || "User",
+      );
+
+      if (!verificationEmailSent) {
+        console.error("Failed to send verification email during registration");
+      }
 
       // FIX: include stateCode in token payload so backend can read it
       const accessToken = generateAccessToken({
@@ -86,7 +144,14 @@ router.post(
       });
 
       res.status(201).json({
-        message: "Registration successful",
+        message: verificationEmailSent
+          ? "Registration successful. Verification code sent to your email"
+          : "Registration successful, but we could not send verification email right now. Please use resend verification.",
+        requiresEmailVerification: true,
+        verificationDelivery: verificationEmailSent ? "sent" : "failed",
+        ...(isDevelopment && !verificationEmailSent
+          ? { verificationCodeForTesting: verificationCode }
+          : {}),
         user: {
           id: user._id,
           email: user.email,
@@ -96,6 +161,7 @@ router.post(
           address: user.address,
           role: user.role,
           stateCode: user.stateCode,
+          emailVerified: user.emailVerified,
         },
         accessToken,
         refreshToken,
@@ -103,6 +169,125 @@ router.post(
     } catch (error) {
       console.error("Registration error:", error);
       res.status(500).json({ error: "Registration failed" });
+    }
+  },
+);
+
+// Verify email with code
+router.post(
+  "/verify-email",
+  validate([
+    body("email").isEmail().normalizeEmail(),
+    body("verificationCode")
+      .isLength({ min: 6, max: 6 })
+      .withMessage("Verification code must be 6 digits"),
+  ]),
+  async (req, res) => {
+    try {
+      const { email, verificationCode } = req.body;
+
+      const user = await User.findOne({ email });
+
+      if (
+        !user ||
+        !user.emailVerificationCode ||
+        !user.emailVerificationCodeExpiry
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Invalid or expired verification code" });
+      }
+
+      if (user.emailVerified) {
+        return res.json({ message: "Email already verified" });
+      }
+
+      if (new Date() > user.emailVerificationCodeExpiry) {
+        return res.status(400).json({ error: "Verification code has expired" });
+      }
+
+      if (user.emailVerificationCode !== verificationCode) {
+        return res.status(400).json({ error: "Invalid verification code" });
+      }
+
+      user.emailVerified = true;
+      user.isVerified = true;
+      user.emailVerificationCode = undefined;
+      user.emailVerificationCodeExpiry = undefined;
+      await user.save();
+
+      void sendWelcomeEmail(user.email, user.firstName || "User").catch(
+        (err) => {
+          console.error("Failed to send welcome email:", err);
+        },
+      );
+
+      res.json({ message: "Email verified successfully" });
+    } catch (error) {
+      console.error("Verify email error:", error);
+      res.status(500).json({ error: "Failed to verify email" });
+    }
+  },
+);
+
+// Resend verification code
+router.post(
+  "/resend-verification",
+  validate([body("email").isEmail().normalizeEmail()]),
+  async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      const user = await User.findOne({ email });
+
+      if (!user) {
+        return res.json({
+          message: "If the email exists, a verification code has been sent",
+        });
+      }
+
+      if (user.emailVerified) {
+        return res.json({ message: "Email already verified" });
+      }
+
+      const verificationCode = generateSixDigitCode();
+      user.emailVerificationCode = verificationCode;
+      user.emailVerificationCodeExpiry = new Date(
+        Date.now() + VERIFICATION_CODE_EXPIRY_MS,
+      );
+      await user.save();
+
+      const verificationEmailSent = await sendEmailVerificationCode(
+        user.email,
+        verificationCode,
+        user.firstName || "User",
+      );
+
+      if (!verificationEmailSent) {
+        console.error("Failed to resend verification email");
+
+        if (isDevelopment) {
+          return res.json({
+            message:
+              "Unable to send email in development. Use the test verification code.",
+            verificationDelivery: "failed",
+            verificationCodeForTesting: verificationCode,
+          });
+        }
+
+        return res.status(503).json({
+          error:
+            "Unable to send verification email right now. Please try again later.",
+        });
+      }
+
+      res.json({
+        message: "Verification code sent",
+        verificationDelivery: "sent",
+      });
+    } catch (error) {
+      console.error("Resend verification error:", error);
+      res.status(500).json({ error: "Failed to resend verification code" });
     }
   },
 );
@@ -142,41 +327,124 @@ router.post(
         return res.status(403).json({ error: "Account is disabled" });
       }
 
+      if (!user.emailVerified) {
+        return res.status(403).json({
+          error: "Please verify your email before logging in",
+          requiresEmailVerification: true,
+          email: user.email,
+        });
+      }
+
       // Update last login
       user.lastLogin = new Date();
       await user.save();
 
-      const accessToken = generateAccessToken({
-        userId: user._id.toString(),
-        email: user.email,
-        role: user.role,
-        stateCode: user.stateCode || undefined,
-      });
-
-      const refreshToken = generateRefreshToken({
-        userId: user._id.toString(),
-        email: user.email,
-        role: user.role,
-        stateCode: user.stateCode || undefined,
-      });
-
-      res.json({
-        message: "Login successful",
-        user: {
-          id: user._id,
-          email: user.email,
-          phone: user.phone,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          stateCode: user.stateCode,
-        },
-        accessToken,
-        refreshToken,
-      });
+      res.json(buildAuthResponse(user));
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Login failed" });
+    }
+  },
+);
+
+// Send login OTP
+router.post(
+  "/login-otp/send",
+  validate([body("phone").matches(/^\+?[1-9]\d{1,14}$/)]),
+  async (req, res) => {
+    try {
+      const { phone } = req.body;
+      const user = await User.findOne({ phone });
+
+      if (!user || !user.isActive) {
+        return res
+          .status(404)
+          .json({ error: "No active account found for this phone number" });
+      }
+
+      if (!user.emailVerified) {
+        return res.status(403).json({
+          error: "Please verify your email before logging in",
+          requiresEmailVerification: true,
+          email: user.email,
+        });
+      }
+
+      const otpCode = generateSixDigitCode();
+      user.loginOtpCode = otpCode;
+      user.loginOtpExpiry = new Date(Date.now() + LOGIN_OTP_EXPIRY_MS);
+      await user.save();
+
+      const smsSent = await sendSMS({
+        to: user.phone,
+        message: `Your Bin-Pay login code is ${otpCode}. It expires in 10 minutes.`,
+      });
+
+      if (!smsSent) {
+        return res
+          .status(500)
+          .json({ error: "Unable to send OTP right now. Please try again." });
+      }
+
+      res.json({ message: "OTP sent successfully" });
+    } catch (error) {
+      console.error("Send login OTP error:", error);
+      res.status(500).json({ error: "Failed to send login OTP" });
+    }
+  },
+);
+
+// Verify login OTP
+router.post(
+  "/login-otp/verify",
+  validate([
+    body("phone").matches(/^\+?[1-9]\d{1,14}$/),
+    body("otpCode").isLength({ min: 6, max: 6 }),
+  ]),
+  async (req, res) => {
+    try {
+      const { phone, otpCode } = req.body;
+      const user = await User.findOne({ phone });
+
+      if (
+        !user ||
+        !user.isActive ||
+        !user.loginOtpCode ||
+        !user.loginOtpExpiry
+      ) {
+        return res.status(400).json({ error: "Invalid or expired OTP" });
+      }
+
+      if (new Date() > user.loginOtpExpiry) {
+        user.loginOtpCode = undefined;
+        user.loginOtpExpiry = undefined;
+        await user.save();
+        return res
+          .status(400)
+          .json({ error: "OTP has expired. Request a new code." });
+      }
+
+      if (user.loginOtpCode !== otpCode) {
+        return res.status(400).json({ error: "Invalid OTP code" });
+      }
+
+      if (!user.emailVerified) {
+        return res.status(403).json({
+          error: "Please verify your email before logging in",
+          requiresEmailVerification: true,
+          email: user.email,
+        });
+      }
+
+      user.loginOtpCode = undefined;
+      user.loginOtpExpiry = undefined;
+      user.lastLogin = new Date();
+      await user.save();
+
+      res.json(buildAuthResponse(user));
+    } catch (error) {
+      console.error("Verify login OTP error:", error);
+      res.status(500).json({ error: "Failed to verify login OTP" });
     }
   },
 );

@@ -1,100 +1,211 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ArrowLeft, Mail, Lock, Phone, AlertCircle } from "lucide-react"
-import Link from "next/link"
-import { Logo } from "@/components/logo"
-import { authApi, ApiError } from "@/lib/api"
-import { useRouter } from "next/navigation"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ArrowLeft, Mail, Lock, Phone, AlertCircle } from "lucide-react";
+import Link from "next/link";
+import { Logo } from "@/components/logo";
+import { authApi, ApiError } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [loginMethod, setLoginMethod] = useState<"email" | "phone">("email")
+  const router = useRouter();
+  const [loginMethod, setLoginMethod] = useState<"email" | "phone">("email");
+  const [otpMode, setOtpMode] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
     phone: "",
     password: "",
+    otpCode: "",
     rememberMe: false,
-  })
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
-    if (error) setError(null)
-  }
+    if (error) setError(null);
+    if (success) setSuccess(null);
+  };
+
+  const redirectByRole = (role: string) => {
+    if (role === "SUPER_ADMIN") {
+      router.push("/super-admin");
+      router.refresh();
+    } else if (role === "STATE_ADMIN") {
+      router.push("/admin/dashboard");
+      router.refresh();
+    } else {
+      router.push("/dashboard");
+      router.refresh();
+    }
+  };
 
   const handleLogin = async () => {
-    setIsLoading(true)
-    setError(null)
+    setIsLoading(true);
+    setError(null);
 
     try {
       // Validate input
       if (loginMethod === "email" && !formData.email) {
-        setError("Email is required")
-        setIsLoading(false)
-        return
+        setError("Email is required");
+        setIsLoading(false);
+        return;
       }
       if (loginMethod === "phone" && !formData.phone) {
-        setError("Phone number is required")
-        setIsLoading(false)
-        return
+        setError("Phone number is required");
+        setIsLoading(false);
+        return;
       }
       if (!formData.password) {
-        setError("Password is required")
-        setIsLoading(false)
-        return
+        setError("Password is required");
+        setIsLoading(false);
+        return;
       }
 
       // Call API
-      const credentials = loginMethod === "email" 
-        ? { email: formData.email, password: formData.password }
-        : { phone: formData.phone, password: formData.password }
+      const credentials =
+        loginMethod === "email"
+          ? { email: formData.email, password: formData.password }
+          : { phone: formData.phone, password: formData.password };
 
-      const response = await authApi.login(credentials)
+      const response = await authApi.login(credentials);
 
       // Store user info and redirect based on role
-      if (response.user.role === "SUPER_ADMIN") {
-        router.push("/super-admin")
-        router.refresh()
-      } else if (response.user.role === "STATE_ADMIN") {
-        router.push("/admin/dashboard")
-        router.refresh()
-      } else {
-        router.push("/dashboard")
-        router.refresh()
-      }
+      redirectByRole(response.user.role);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message)
+        if (err.status === 403 && err.data?.requiresEmailVerification) {
+          const email =
+            typeof err.data?.email === "string"
+              ? err.data.email
+              : formData.email;
+          router.push(
+            `/register?verifyEmail=1&email=${encodeURIComponent(email)}`,
+          );
+          return;
+        }
+        setError(err.message);
       } else {
-        setError("An unexpected error occurred. Please try again.")
+        setError("An unexpected error occurred. Please try again.");
       }
-      console.error("Login error:", err)
+      console.error("Login error:", err);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
+
+  const handleSendOtp = async () => {
+    setError(null);
+    setSuccess(null);
+
+    if (!formData.phone) {
+      setError("Phone number is required for OTP login");
+      return;
+    }
+
+    setIsSendingOtp(true);
+
+    try {
+      await authApi.sendLoginOtp({
+        phone: formData.phone.replace(/\s/g, ""),
+      });
+      setOtpSent(true);
+      setSuccess("OTP sent. Enter the 6-digit code to continue.");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 403 && err.data?.requiresEmailVerification) {
+          const email =
+            typeof err.data?.email === "string"
+              ? err.data.email
+              : formData.email;
+          router.push(
+            `/register?verifyEmail=1&email=${encodeURIComponent(email)}`,
+          );
+          return;
+        }
+        setError(err.message);
+      } else {
+        setError("Unable to send OTP. Please try again.");
+      }
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    setError(null);
+    setSuccess(null);
+
+    if (!formData.phone) {
+      setError("Phone number is required");
+      return;
+    }
+
+    if (formData.otpCode.trim().length !== 6) {
+      setError("Enter the 6-digit OTP code");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const response = await authApi.verifyLoginOtp({
+        phone: formData.phone.replace(/\s/g, ""),
+        otpCode: formData.otpCode.trim(),
+      });
+      redirectByRole(response.user.role);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 403 && err.data?.requiresEmailVerification) {
+          const email =
+            typeof err.data?.email === "string"
+              ? err.data.email
+              : formData.email;
+          router.push(
+            `/register?verifyEmail=1&email=${encodeURIComponent(email)}`,
+          );
+          return;
+        }
+        setError(err.message);
+      } else {
+        setError("OTP verification failed. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
-      handleLogin()
+      handleLogin();
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center text-green-600 hover:text-green-700 mb-4">
+          <Link
+            href="/"
+            className="inline-flex items-center text-green-600 hover:text-green-700 mb-4"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Home
           </Link>
@@ -106,7 +217,9 @@ export default function LoginPage() {
         <Card>
           <CardHeader>
             <CardTitle>Sign In</CardTitle>
-            <CardDescription>Choose your preferred login method</CardDescription>
+            <CardDescription>
+              Choose your preferred login method
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Error Alert */}
@@ -116,29 +229,40 @@ export default function LoginPage() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
+            {success && (
+              <Alert>
+                <AlertDescription>{success}</AlertDescription>
+              </Alert>
+            )}
 
             {/* Login Method Toggle */}
-            <div className="flex rounded-lg bg-gray-100 p-1">
-              <button
-                onClick={() => setLoginMethod("email")}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                  loginMethod === "email" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                Email
-              </button>
-              <button
-                onClick={() => setLoginMethod("phone")}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                  loginMethod === "phone" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                Phone
-              </button>
-            </div>
+            {!otpMode && (
+              <div className="flex rounded-lg bg-gray-100 p-1">
+                <button
+                  onClick={() => setLoginMethod("email")}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    loginMethod === "email"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  Email
+                </button>
+                <button
+                  onClick={() => setLoginMethod("phone")}
+                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                    loginMethod === "phone"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  Phone
+                </button>
+              </div>
+            )}
 
             {/* Email Login */}
-            {loginMethod === "email" && (
+            {!otpMode && loginMethod === "email" && (
               <div>
                 <Label htmlFor="email">Email Address</Label>
                 <div className="relative">
@@ -158,7 +282,7 @@ export default function LoginPage() {
             )}
 
             {/* Phone Login */}
-            {loginMethod === "phone" && (
+            {(otpMode || loginMethod === "phone") && (
               <div>
                 <Label htmlFor="phone">Phone Number</Label>
                 <div className="relative">
@@ -177,56 +301,137 @@ export default function LoginPage() {
               </div>
             )}
 
-            <div>
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            {!otpMode && (
+              <div>
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="password"
+                    type="password"
+                    className="pl-10"
+                    value={formData.password}
+                    onChange={(e) =>
+                      handleInputChange("password", e.target.value)
+                    }
+                    onKeyPress={handleKeyPress}
+                    placeholder="••••••••"
+                    disabled={isLoading}
+                  />
+                </div>
+              </div>
+            )}
+
+            {otpMode && otpSent && (
+              <div>
+                <Label htmlFor="otpCode">OTP Code</Label>
                 <Input
-                  id="password"
-                  type="password"
-                  className="pl-10"
-                  value={formData.password}
-                  onChange={(e) => handleInputChange("password", e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="••••••••"
+                  id="otpCode"
+                  value={formData.otpCode}
+                  onChange={(e) =>
+                    handleInputChange(
+                      "otpCode",
+                      e.target.value.replace(/\D/g, ""),
+                    )
+                  }
+                  placeholder="123456"
+                  maxLength={6}
+                  className="tracking-[0.4em] text-center"
                   disabled={isLoading}
                 />
               </div>
-            </div>
+            )}
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="rememberMe"
-                  checked={formData.rememberMe}
-                  onCheckedChange={(checked) => handleInputChange("rememberMe", checked as boolean)}
-                />
-                <Label htmlFor="rememberMe" className="text-sm">
-                  Remember me
-                </Label>
+            {!otpMode && (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="rememberMe"
+                    checked={formData.rememberMe}
+                    onCheckedChange={(checked) =>
+                      handleInputChange("rememberMe", checked as boolean)
+                    }
+                  />
+                  <Label htmlFor="rememberMe" className="text-sm">
+                    Remember me
+                  </Label>
+                </div>
+                <Link
+                  href="/forgot-password"
+                  className="text-sm text-green-600 hover:underline"
+                >
+                  Forgot password?
+                </Link>
               </div>
-              <Link href="/forgot-password" className="text-sm text-green-600 hover:underline">
-                Forgot password?
-              </Link>
-            </div>
+            )}
 
-            <Button onClick={handleLogin} className="w-full" disabled={isLoading}>
-              {isLoading ? "Signing in..." : "Sign In"}
-            </Button>
+            {!otpMode ? (
+              <Button
+                onClick={handleLogin}
+                className="w-full"
+                disabled={isLoading}
+              >
+                {isLoading ? "Signing in..." : "Sign In"}
+              </Button>
+            ) : otpSent ? (
+              <Button
+                onClick={handleVerifyOtp}
+                className="w-full"
+                disabled={isLoading || formData.otpCode.length !== 6}
+              >
+                {isLoading ? "Verifying..." : "Verify OTP"}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSendOtp}
+                className="w-full"
+                disabled={isSendingOtp}
+              >
+                {isSendingOtp ? "Sending OTP..." : "Send OTP"}
+              </Button>
+            )}
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-gray-500">Or continue with</span>
+                <span className="bg-white px-2 text-gray-500">
+                  Or continue with
+                </span>
               </div>
             </div>
 
-            <Button variant="outline" className="w-full">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setError(null);
+                setSuccess(null);
+                if (otpMode) {
+                  setOtpMode(false);
+                  setOtpSent(false);
+                  setFormData((prev) => ({ ...prev, otpCode: "" }));
+                } else {
+                  setOtpMode(true);
+                  setOtpSent(false);
+                }
+              }}
+            >
               <Phone className="w-4 h-4 mr-2" />
-              Login with OTP
+              {otpMode ? "Back to Password Login" : "Login with OTP"}
             </Button>
+
+            {otpMode && otpSent && (
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={handleSendOtp}
+                disabled={isSendingOtp}
+              >
+                {isSendingOtp ? "Resending..." : "Resend OTP"}
+              </Button>
+            )}
 
             <p className="text-center text-sm text-gray-600">
               Don't have an account?{" "}
@@ -238,5 +443,5 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
-  )
+  );
 }

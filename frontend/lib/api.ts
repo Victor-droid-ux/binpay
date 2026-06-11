@@ -71,6 +71,25 @@ export const authApi = {
     return data;
   },
 
+  sendLoginOtp: async (payload: { phone: string }) => {
+    return fetchApi("/auth/login-otp/send", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  verifyLoginOtp: async (payload: { phone: string; otpCode: string }) => {
+    const data = await fetchApi("/auth/login-otp/verify", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (data.accessToken) localStorage.setItem("accessToken", data.accessToken);
+    if (data.refreshToken)
+      localStorage.setItem("refreshToken", data.refreshToken);
+    if (data.user) localStorage.setItem("user", JSON.stringify(data.user));
+    return data;
+  },
+
   register: async (userData: {
     email: string;
     phone: string;
@@ -90,6 +109,20 @@ export const authApi = {
       localStorage.setItem("refreshToken", data.refreshToken);
     if (data.user) localStorage.setItem("user", JSON.stringify(data.user));
     return data;
+  },
+
+  verifyEmail: async (payload: { email: string; verificationCode: string }) => {
+    return fetchApi("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  resendVerification: async (payload: { email: string }) => {
+    return fetchApi("/auth/resend-verification", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 
   refreshToken: async () => {
