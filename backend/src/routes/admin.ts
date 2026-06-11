@@ -290,12 +290,12 @@ router.post(
 
       const user = await User.findById(userId);
       if (!user || !user.stateCode) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "⚠️ Unable to load your state's billing profile. Please refresh the page or contact support if the issue persists.",
-          });
+        return res.status(400).json({
+          error:
+            "⚠️ Unable to load your state's billing profile. Please refresh the page or contact support if the issue persists.",
+          dismissAfterMs: 8000,
+          severity: "warning",
+        });
       }
 
       const binRegistration = await BinRegistration.findOne({
@@ -305,9 +305,11 @@ router.post(
       }).sort({ createdAt: -1 });
 
       if (!binRegistration) {
-        return res
-          .status(400)
-          .json({ error: "Please link your bin before notifying your admin" });
+        return res.status(400).json({
+          error: "Please link your bin before notifying your admin",
+          dismissAfterMs: 7000,
+          severity: "warning",
+        });
       }
       const addressInfo = `${binRegistration.address}, ${binRegistration.lgaName}, ${binRegistration.stateCode}`;
 

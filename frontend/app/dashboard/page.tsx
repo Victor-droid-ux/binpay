@@ -54,6 +54,7 @@ import { useToast, toast } from "@/hooks/use-toast";
 
 const BIN_FULL_BANNER_DISMISSED_KEY =
   "binpay_dashboard_bin_full_banner_dismissed";
+const INLINE_ALERT_TIMEOUT_MS = 6000;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -73,6 +74,7 @@ export default function DashboardPage() {
   const [isLoadingPayments, setIsLoadingPayments] = useState(false);
   const [isLoadingBills, setIsLoadingBills] = useState(false);
   const [error, setError] = useState("");
+  const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
 
   const [stats, setStats] = useState({
     totalPaid: 0,
@@ -116,6 +118,34 @@ export default function DashboardPage() {
     billCycle: string;
   } | null>(null);
 
+  const showInlineError = (
+    message: string,
+    dismissAfterMs: number = INLINE_ALERT_TIMEOUT_MS,
+  ) => {
+    setErrorDismissMs(dismissAfterMs);
+    setError(message);
+  };
+
+  useEffect(() => {
+    if (!error) return;
+
+    const timer = setTimeout(() => {
+      setError("");
+    }, errorDismissMs);
+
+    return () => clearTimeout(timer);
+  }, [error, errorDismissMs]);
+
+  useEffect(() => {
+    if (!registeredBinId) return;
+
+    const timer = setTimeout(() => {
+      setRegisteredBinId(null);
+    }, INLINE_ALERT_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [registeredBinId]);
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -147,7 +177,7 @@ export default function DashboardPage() {
         try {
           const bins = await billsApi.getUserBins();
           if (!bins.bins || bins.bins.length === 0) {
-            setError(
+            showInlineError(
               "You are not linked to any bin. Go to Profile to register or link your address.",
             );
           }
@@ -242,7 +272,7 @@ export default function DashboardPage() {
 
   const handleAddressSearch = async () => {
     if (!addressSearch.address && !addressSearch.stateCode) {
-      setError("Please enter an address or select a state");
+      showInlineError("Please enter an address or select a state");
       return;
     }
     try {
@@ -253,7 +283,10 @@ export default function DashboardPage() {
       setSearchResults(response.results || []);
       setHasSearched(true);
     } catch (err: any) {
-      setError(err.message || "Failed to search addresses");
+      showInlineError(
+        err.message || "Failed to search addresses",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
       setSearchResults([]);
       setHasSearched(true);
     } finally {
@@ -274,7 +307,10 @@ export default function DashboardPage() {
     } catch (err: any) {
       let errorMsg = err?.message || "Failed to link bin";
       if (err?.data?.error) errorMsg = err.data.error;
-      setError(errorMsg);
+      showInlineError(
+        errorMsg,
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     }
   };
 
@@ -286,7 +322,10 @@ export default function DashboardPage() {
       await loadUserBins();
       showToast({ title: "Bin unlinked successfully" });
     } catch (err: any) {
-      setError(err.message || "Failed to unlink bin");
+      showInlineError(
+        err.message || "Failed to unlink bin",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     }
   };
 
@@ -295,7 +334,9 @@ export default function DashboardPage() {
   const handleRegisterAddress = async () => {
     const { address, lgaName } = addressSearch;
     if (!address || !lgaName) {
-      setError("Please enter both an address and select an LGA to register.");
+      showInlineError(
+        "Please enter both an address and select an LGA to register.",
+      );
       return;
     }
     try {
@@ -319,7 +360,10 @@ export default function DashboardPage() {
       // Reload notifications so the user can see any immediate feedback
       await loadNotifications();
     } catch (err: any) {
-      setError(err?.message || "Failed to register address");
+      showInlineError(
+        err?.message || "Failed to register address",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     } finally {
       setIsRegisteringAddress(false);
     }
@@ -343,20 +387,30 @@ export default function DashboardPage() {
       setError("");
       const response = await billsApi.getByBinId(billLookup.binId);
       if (!response.binRegistration) {
-        setError("Bin ID not found");
+        showInlineError("Bin ID not found");
         setFoundBill(null);
         return;
       }
       if (!response.currentBill) {
-        setError(
-          "No active bill found for this bin. Try linking it to your account.",
-        );
+        const latestStatus = response.latestBill?.status;
+        if (latestStatus) {
+          showInlineError(
+            `No unpaid bill found for this bin. Latest bill status: ${latestStatus}.`,
+          );
+        } else {
+          showInlineError(
+            "No bill found for this bin yet. Your state admin may need to generate one.",
+          );
+        }
         setFoundBill(null);
         return;
       }
       setFoundBill(response.currentBill);
     } catch (err: any) {
-      setError(err?.message || "Failed to lookup bill");
+      showInlineError(
+        err?.message || "Failed to lookup bill",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
       setFoundBill(null);
     }
   };
@@ -414,10 +468,13 @@ export default function DashboardPage() {
       if (response.paystack?.authorizationUrl) {
         window.location.href = response.paystack.authorizationUrl;
       } else {
-        setError("Failed to initialize payment. Please try again.");
+        showInlineError("Failed to initialize payment. Please try again.");
       }
     } catch (err: any) {
-      setError(err.message || "Failed to initialize payment");
+      showInlineError(
+        err.message || "Failed to initialize payment",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     }
   };
 

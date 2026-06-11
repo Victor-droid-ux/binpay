@@ -38,6 +38,7 @@ import { authApi, ApiError } from "@/lib/api";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function RegisterPage() {
+  const INLINE_ALERT_TIMEOUT_MS = 6000;
   const router = useRouter();
   const searchParams = useSearchParams();
   const preSelectedState = searchParams.get("state");
@@ -66,6 +67,35 @@ export default function RegisterPage() {
   const [isResending, setIsResending] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [didAutoResend, setDidAutoResend] = useState(false);
+  const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
+
+  useEffect(() => {
+    if (!error) return;
+
+    const timer = setTimeout(() => {
+      setError(null);
+    }, errorDismissMs);
+
+    return () => clearTimeout(timer);
+  }, [error, errorDismissMs]);
+
+  const showInlineError = (
+    message: string,
+    dismissAfterMs: number = INLINE_ALERT_TIMEOUT_MS,
+  ) => {
+    setErrorDismissMs(dismissAfterMs);
+    setError(message);
+  };
+
+  useEffect(() => {
+    if (!successMessage) return;
+
+    const timer = setTimeout(() => {
+      setSuccessMessage(null);
+    }, INLINE_ALERT_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   const passwordChecks = {
     minLength: formData.password.length >= 8,
@@ -94,9 +124,12 @@ export default function RegisterPage() {
         );
       } catch (err) {
         if (err instanceof ApiError) {
-          setError(err.message);
+          showInlineError(
+            err.message,
+            err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+          );
         } else {
-          setError("Unable to resend code right now. Please try again.");
+          showInlineError("Unable to resend code right now. Please try again.");
         }
       } finally {
         setIsResending(false);
@@ -119,49 +152,53 @@ export default function RegisterPage() {
 
   const validateForm = () => {
     if (!formData.firstName.trim()) {
-      setError("First name is required");
+      showInlineError("First name is required");
       return false;
     }
     if (!formData.lastName.trim()) {
-      setError("Last name is required");
+      showInlineError("Last name is required");
       return false;
     }
     if (!formData.email.trim()) {
-      setError("Email is required");
+      showInlineError("Email is required");
       return false;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      setError("Please enter a valid email address");
+      showInlineError("Please enter a valid email address");
       return false;
     }
     if (!formData.phone.trim()) {
-      setError("Phone number is required");
+      showInlineError("Phone number is required");
       return false;
     }
     if (!/^\+?[1-9]\d{1,14}$/.test(formData.phone.replace(/\s/g, ""))) {
-      setError("Please enter a valid phone number (e.g., +2348012345678)");
+      showInlineError(
+        "Please enter a valid phone number (e.g., +2348012345678)",
+      );
       return false;
     }
     if (!formData.state) {
-      setError("Please select your state");
+      showInlineError("Please select your state");
       return false;
     }
     if (!formData.password) {
-      setError("Password is required");
+      showInlineError("Password is required");
       return false;
     }
     if (!allPasswordChecksPass) {
-      setError(
+      showInlineError(
         "Password must be at least 8 characters and include uppercase, lowercase, number, and special character",
       );
       return false;
     }
     if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match");
+      showInlineError("Passwords do not match");
       return false;
     }
     if (!formData.agreeToTerms) {
-      setError("You must agree to the Terms of Service and Privacy Policy");
+      showInlineError(
+        "You must agree to the Terms of Service and Privacy Policy",
+      );
       return false;
     }
     return true;
@@ -196,9 +233,12 @@ export default function RegisterPage() {
       setStep(2);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        showInlineError(
+          err.message,
+          err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
       } else {
-        setError("Registration failed. Please try again.");
+        showInlineError("Registration failed. Please try again.");
       }
       console.error("Registration error:", err);
     } finally {
@@ -212,12 +252,12 @@ export default function RegisterPage() {
     const emailToVerify = verificationEmail || formData.email.trim();
 
     if (!emailToVerify) {
-      setError("Email is required to verify your account");
+      showInlineError("Email is required to verify your account");
       return;
     }
 
     if (verificationCode.trim().length !== 6) {
-      setError("Enter the 6-digit verification code from your email");
+      showInlineError("Enter the 6-digit verification code from your email");
       return;
     }
 
@@ -233,9 +273,12 @@ export default function RegisterPage() {
       setStep(3);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        showInlineError(
+          err.message,
+          err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
       } else {
-        setError("Verification failed. Please try again.");
+        showInlineError("Verification failed. Please try again.");
       }
     } finally {
       setIsLoading(false);
@@ -248,7 +291,7 @@ export default function RegisterPage() {
     const emailToVerify = verificationEmail || formData.email.trim();
 
     if (!emailToVerify) {
-      setError("Email is required to resend verification code");
+      showInlineError("Email is required to resend verification code");
       return;
     }
 
@@ -261,9 +304,12 @@ export default function RegisterPage() {
       setSuccessMessage("A new verification code has been sent.");
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        showInlineError(
+          err.message,
+          err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
       } else {
-        setError("Unable to resend code right now. Please try again.");
+        showInlineError("Unable to resend code right now. Please try again.");
       }
     } finally {
       setIsResending(false);

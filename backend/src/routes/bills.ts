@@ -301,29 +301,62 @@ router.get(
     try {
       const { binId } = req.params;
 
-      const binRegistration = await BinRegistration.findOne({ binId }).populate(
-        "userId",
-      );
+      const binRegistration = await BinRegistration.findOne({
+        binId,
+        isActive: true,
+      }).populate("userId");
 
       if (!binRegistration) {
-        return res.status(404).json({ error: "Bin ID not found" });
+        return res.status(404).json({
+          error: "Bin ID not found",
+          dismissAfterMs: 6000,
+          severity: "warning",
+        });
       }
 
-      // Get current pending/overdue bill
+      if (!binRegistration.userId) {
+        return res.status(400).json({
+          error: "This bin is not linked to any account yet",
+          dismissAfterMs: 6000,
+          severity: "warning",
+        });
+      }
+
+      if (binRegistration.userId.toString() !== req.user!.userId) {
+        return res.status(403).json({
+          error:
+            "This bin is not linked to your account. Please link it to continue.",
+          dismissAfterMs: 7000,
+          severity: "warning",
+        });
+      }
+
+      // Get current unpaid bill (supports legacy status values in older data)
       const currentBill = await Bill.findOne({
         binRegistrationId: binRegistration._id,
-        status: { $in: ["PENDING", "OVERDUE"] },
+        status: { $in: ["PENDING", "OVERDUE", "pending", "overdue"] },
       })
         .sort({ dueDate: 1 })
+        .limit(1);
+
+      const latestBill = await Bill.findOne({
+        binRegistrationId: binRegistration._id,
+      })
+        .sort({ dueDate: -1 })
         .limit(1);
 
       res.json({
         binRegistration,
         currentBill: currentBill || null,
+        latestBill: latestBill || null,
       });
     } catch (error) {
       console.error("Bill lookup error:", error);
-      res.status(500).json({ error: "Failed to lookup bill" });
+      res.status(500).json({
+        error: "Failed to lookup bill",
+        dismissAfterMs: 8000,
+        severity: "error",
+      });
     }
   },
 );

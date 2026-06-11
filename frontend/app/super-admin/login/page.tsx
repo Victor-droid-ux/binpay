@@ -1,99 +1,137 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ArrowLeft, Mail, Lock, Shield, AlertCircle } from "lucide-react"
-import Link from "next/link"
-import { Logo } from "@/components/logo"
-import { authApi, ApiError } from "@/lib/api"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ArrowLeft, Mail, Lock, Shield, AlertCircle } from "lucide-react";
+import Link from "next/link";
+import { Logo } from "@/components/logo";
+import { authApi, ApiError } from "@/lib/api";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function SuperAdminLoginPage() {
-  const router = useRouter()
+  const INLINE_ALERT_TIMEOUT_MS = 6000;
+  const router = useRouter();
   const [formData, setFormData] = useState({
     email: "",
     password: "",
     rememberMe: false,
-  })
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
+
+  useEffect(() => {
+    if (!error) return;
+
+    const timer = setTimeout(() => {
+      setError(null);
+    }, errorDismissMs);
+
+    return () => clearTimeout(timer);
+  }, [error, errorDismissMs]);
+
+  const showInlineError = (
+    message: string,
+    dismissAfterMs: number = INLINE_ALERT_TIMEOUT_MS,
+  ) => {
+    setErrorDismissMs(dismissAfterMs);
+    setError(message);
+  };
 
   const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
-    if (error) setError(null)
-  }
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (error) setError(null);
+  };
 
   const handleLogin = async () => {
-    setIsLoading(true)
-    setError(null)
+    setIsLoading(true);
+    setError(null);
 
     try {
       if (!formData.email || !formData.password) {
-        setError("Email and password are required")
-        setIsLoading(false)
-        return
+        showInlineError("Email and password are required");
+        setIsLoading(false);
+        return;
       }
 
       const response = await authApi.login({
         email: formData.email,
         password: formData.password,
-      })
+      });
 
       // Verify user has SUPER_ADMIN role
       if (response.user.role !== "SUPER_ADMIN") {
-        setError("Access denied. Super admin privileges required.")
-        authApi.logout() // Clear any tokens
-        setIsLoading(false)
-        return
+        showInlineError("Access denied. Super admin privileges required.");
+        authApi.logout(); // Clear any tokens
+        setIsLoading(false);
+        return;
       }
 
       // Redirect to super admin dashboard
-      router.push("/super-admin")
-      router.refresh()
+      router.push("/super-admin");
+      router.refresh();
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message)
+        showInlineError(
+          err.message,
+          err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
       } else {
-        setError("An unexpected error occurred. Please try again.")
+        showInlineError("An unexpected error occurred. Please try again.");
       }
-      console.error("Super admin login error:", err)
+      console.error("Super admin login error:", err);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
-      handleLogin()
+      handleLogin();
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center text-red-600 hover:text-red-700 mb-4">
+          <Link
+            href="/"
+            className="inline-flex items-center text-red-600 hover:text-red-700 mb-4"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Home
           </Link>
           <Logo size="md" className="justify-center mb-4" />
           <div className="flex items-center justify-center mb-2">
             <Shield className="w-6 h-6 text-red-600 mr-2" />
-            <h1 className="text-2xl font-bold text-gray-900">Super Admin Login</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Super Admin Login
+            </h1>
           </div>
-          <p className="text-gray-600">Access the system administration dashboard</p>
+          <p className="text-gray-600">
+            Access the system administration dashboard
+          </p>
         </div>
 
         <Card>
           <CardHeader>
             <CardTitle>Super Administrator Sign In</CardTitle>
-            <CardDescription>Sign in to manage the entire Bin-Pay system across all states</CardDescription>
+            <CardDescription>
+              Sign in to manage the entire Bin-Pay system across all states
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {error && (
@@ -129,7 +167,9 @@ export default function SuperAdminLoginPage() {
                   type="password"
                   className="pl-10"
                   value={formData.password}
-                  onChange={(e) => handleInputChange("password", e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("password", e.target.value)
+                  }
                   onKeyPress={handleKeyPress}
                   placeholder="••••••••"
                   disabled={isLoading}
@@ -142,7 +182,9 @@ export default function SuperAdminLoginPage() {
                 <Checkbox
                   id="rememberMe"
                   checked={formData.rememberMe}
-                  onCheckedChange={(checked) => handleInputChange("rememberMe", checked as boolean)}
+                  onCheckedChange={(checked) =>
+                    handleInputChange("rememberMe", checked as boolean)
+                  }
                 />
                 <Label htmlFor="rememberMe" className="text-sm">
                   Remember me
@@ -150,12 +192,19 @@ export default function SuperAdminLoginPage() {
               </div>
             </div>
 
-            <Button onClick={handleLogin} className="w-full bg-red-600 hover:bg-red-700" disabled={isLoading}>
+            <Button
+              onClick={handleLogin}
+              className="w-full bg-red-600 hover:bg-red-700"
+              disabled={isLoading}
+            >
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
 
             <div className="text-center">
-              <Link href="/super-admin/forgot-password" className="text-sm text-red-600 hover:underline">
+              <Link
+                href="/super-admin/forgot-password"
+                className="text-sm text-red-600 hover:underline"
+              >
                 Need help accessing your account?
               </Link>
             </div>
@@ -167,15 +216,18 @@ export default function SuperAdminLoginPage() {
           <div className="flex items-start space-x-2">
             <Shield className="w-5 h-5 text-red-600 mt-0.5" />
             <div>
-              <h3 className="font-medium text-red-900">Critical Security Notice</h3>
+              <h3 className="font-medium text-red-900">
+                Critical Security Notice
+              </h3>
               <p className="text-sm text-red-700 mt-1">
-                This is a highly restricted super administrator portal. All activities are monitored and logged. Only
-                authorized personnel with explicit permission should access this system.
+                This is a highly restricted super administrator portal. All
+                activities are monitored and logged. Only authorized personnel
+                with explicit permission should access this system.
               </p>
             </div>
           </div>
         </div>
       </div>
     </div>
-  )
+  );
 }

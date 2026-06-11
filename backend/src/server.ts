@@ -69,7 +69,12 @@ app.use("/api/info", infoRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
-  res.status(404).json({ error: "Route not found" });
+  res.status(404).json({
+    error: "Route not found",
+    code: "ROUTE_NOT_FOUND",
+    severity: "warning",
+    dismissAfterMs: 6000,
+  });
 });
 
 // Error handler
@@ -77,6 +82,9 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error("Error:", err);
   res.status(500).json({
     error: "Internal server error",
+    code: "INTERNAL_SERVER_ERROR",
+    severity: "error",
+    dismissAfterMs: 8000,
     message: process.env.NODE_ENV === "development" ? err.message : undefined,
   });
 });

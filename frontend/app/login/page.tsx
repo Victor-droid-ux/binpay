@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function LoginPage() {
+  const INLINE_ALERT_TIMEOUT_MS = 6000;
   const router = useRouter();
   const [loginMethod, setLoginMethod] = useState<"email" | "phone">("email");
   const [otpMode, setOtpMode] = useState(false);
@@ -35,6 +36,35 @@ export default function LoginPage() {
   const [otpSent, setOtpSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
+
+  useEffect(() => {
+    if (!error) return;
+
+    const timer = setTimeout(() => {
+      setError(null);
+    }, errorDismissMs);
+
+    return () => clearTimeout(timer);
+  }, [error, errorDismissMs]);
+
+  const showInlineError = (
+    message: string,
+    dismissAfterMs: number = INLINE_ALERT_TIMEOUT_MS,
+  ) => {
+    setErrorDismissMs(dismissAfterMs);
+    setError(message);
+  };
+
+  useEffect(() => {
+    if (!success) return;
+
+    const timer = setTimeout(() => {
+      setSuccess(null);
+    }, INLINE_ALERT_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [success]);
 
   const handleInputChange = (field: string, value: string | boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -63,17 +93,17 @@ export default function LoginPage() {
     try {
       // Validate input
       if (loginMethod === "email" && !formData.email) {
-        setError("Email is required");
+        showInlineError("Email is required");
         setIsLoading(false);
         return;
       }
       if (loginMethod === "phone" && !formData.phone) {
-        setError("Phone number is required");
+        showInlineError("Phone number is required");
         setIsLoading(false);
         return;
       }
       if (!formData.password) {
-        setError("Password is required");
+        showInlineError("Password is required");
         setIsLoading(false);
         return;
       }
@@ -100,9 +130,12 @@ export default function LoginPage() {
           );
           return;
         }
-        setError(err.message);
+        showInlineError(
+          err.message,
+          err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
       } else {
-        setError("An unexpected error occurred. Please try again.");
+        showInlineError("An unexpected error occurred. Please try again.");
       }
       console.error("Login error:", err);
     } finally {
@@ -115,7 +148,7 @@ export default function LoginPage() {
     setSuccess(null);
 
     if (!formData.phone) {
-      setError("Phone number is required for OTP login");
+      showInlineError("Phone number is required for OTP login");
       return;
     }
 
@@ -139,9 +172,12 @@ export default function LoginPage() {
           );
           return;
         }
-        setError(err.message);
+        showInlineError(
+          err.message,
+          err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
       } else {
-        setError("Unable to send OTP. Please try again.");
+        showInlineError("Unable to send OTP. Please try again.");
       }
     } finally {
       setIsSendingOtp(false);
@@ -153,12 +189,12 @@ export default function LoginPage() {
     setSuccess(null);
 
     if (!formData.phone) {
-      setError("Phone number is required");
+      showInlineError("Phone number is required");
       return;
     }
 
     if (formData.otpCode.trim().length !== 6) {
-      setError("Enter the 6-digit OTP code");
+      showInlineError("Enter the 6-digit OTP code");
       return;
     }
 
@@ -182,9 +218,12 @@ export default function LoginPage() {
           );
           return;
         }
-        setError(err.message);
+        showInlineError(
+          err.message,
+          err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
       } else {
-        setError("OTP verification failed. Please try again.");
+        showInlineError("OTP verification failed. Please try again.");
       }
     } finally {
       setIsLoading(false);

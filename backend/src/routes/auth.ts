@@ -24,6 +24,12 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 const generateSixDigitCode = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
+const uiError = (
+  error: string,
+  dismissAfterMs = 6000,
+  severity: "warning" | "error" = "warning",
+) => ({ error, dismissAfterMs, severity });
+
 const buildAuthResponse = (user: any) => {
   const accessToken = generateAccessToken({
     userId: user._id.toString(),
@@ -91,7 +97,7 @@ router.post(
       if (existingUser) {
         return res
           .status(400)
-          .json({ error: "Email or phone already registered" });
+          .json(uiError("Email or phone already registered", 7000));
       }
 
       // Hash password
@@ -203,11 +209,13 @@ router.post(
       }
 
       if (new Date() > user.emailVerificationCodeExpiry) {
-        return res.status(400).json({ error: "Verification code has expired" });
+        return res
+          .status(400)
+          .json(uiError("Verification code has expired", 7000));
       }
 
       if (user.emailVerificationCode !== verificationCode) {
-        return res.status(400).json({ error: "Invalid verification code" });
+        return res.status(400).json(uiError("Invalid verification code", 7000));
       }
 
       user.emailVerified = true;
@@ -307,24 +315,24 @@ router.post(
       const { email, phone, password } = req.body;
 
       if (!email && !phone) {
-        return res.status(400).json({ error: "Email or phone is required" });
+        return res.status(400).json(uiError("Email or phone is required"));
       }
 
       // Find user
       const user = await User.findOne(email ? { email } : { phone });
 
       if (!user) {
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json(uiError("Invalid credentials", 6000));
       }
 
       // Check password
       const validPassword = await bcrypt.compare(password, user.password);
       if (!validPassword) {
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json(uiError("Invalid credentials", 6000));
       }
 
       if (!user.isActive) {
-        return res.status(403).json({ error: "Account is disabled" });
+        return res.status(403).json(uiError("Account is disabled", 7000));
       }
 
       if (!user.emailVerified) {
@@ -383,7 +391,9 @@ router.post(
       if (!smsSent) {
         return res
           .status(500)
-          .json({ error: "Unable to send OTP right now. Please try again." });
+          .json(
+            uiError("Unable to send OTP right now. Please try again.", 7000),
+          );
       }
 
       res.json({ message: "OTP sent successfully" });
@@ -412,7 +422,7 @@ router.post(
         !user.loginOtpCode ||
         !user.loginOtpExpiry
       ) {
-        return res.status(400).json({ error: "Invalid or expired OTP" });
+        return res.status(400).json(uiError("Invalid or expired OTP", 7000));
       }
 
       if (new Date() > user.loginOtpExpiry) {
@@ -421,11 +431,11 @@ router.post(
         await user.save();
         return res
           .status(400)
-          .json({ error: "OTP has expired. Request a new code." });
+          .json(uiError("OTP has expired. Request a new code.", 7000));
       }
 
       if (user.loginOtpCode !== otpCode) {
-        return res.status(400).json({ error: "Invalid OTP code" });
+        return res.status(400).json(uiError("Invalid OTP code", 7000));
       }
 
       if (!user.emailVerified) {

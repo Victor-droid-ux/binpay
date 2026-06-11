@@ -106,6 +106,8 @@ import {
   getCurrentStateLGAs,
 } from "@/lib/constants";
 
+const INLINE_ALERT_TIMEOUT_MS = 6000;
+
 export default function AdminDashboardPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -114,6 +116,7 @@ export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState("overview");
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [stateStats, setStateStats] = useState<any>(null);
 
@@ -178,6 +181,34 @@ export default function AdminDashboardPage() {
   const [mapCenter, setMapCenter] = useState({ lat: 6.5244, lng: 3.3792 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showLGABoundaries, setShowLGABoundaries] = useState(false);
+
+  useEffect(() => {
+    if (!error) return;
+
+    const timer = setTimeout(() => {
+      setError(null);
+    }, errorDismissMs);
+
+    return () => clearTimeout(timer);
+  }, [error, errorDismissMs]);
+
+  const showInlineError = (
+    message: string,
+    dismissAfterMs: number = INLINE_ALERT_TIMEOUT_MS,
+  ) => {
+    setErrorDismissMs(dismissAfterMs);
+    setError(message);
+  };
+
+  useEffect(() => {
+    if (!registeredBinId) return;
+
+    const timer = setTimeout(() => {
+      setRegisteredBinId(null);
+    }, INLINE_ALERT_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [registeredBinId]);
 
   // Notifications
   const [isNotificationSending, setIsNotificationSending] = useState<
@@ -293,7 +324,12 @@ export default function AdminDashboardPage() {
         if (err instanceof ApiError && err.status === 401) {
           router.push("/admin/login");
         } else {
-          setError("Failed to load dashboard data");
+          showInlineError(
+            "Failed to load dashboard data",
+            err instanceof ApiError
+              ? err.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS
+              : INLINE_ALERT_TIMEOUT_MS,
+          );
         }
       } finally {
         setIsInitialLoading(false);
