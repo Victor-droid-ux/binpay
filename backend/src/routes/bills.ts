@@ -341,7 +341,7 @@ router.get(
 
       const binRegistration = await findBinByFlexibleId(binId, {
         isActive: true,
-      }).then((bin) => (bin ? bin.populate("userId") : null));
+      });
 
       if (!binRegistration) {
         return res.status(404).json({
@@ -368,6 +368,8 @@ router.get(
         });
       }
 
+      const populatedBinRegistration = await binRegistration.populate("userId");
+
       // Get current unpaid bill (supports legacy status values in older data)
       const currentBill = await Bill.findOne({
         binRegistrationId: binRegistration._id,
@@ -383,7 +385,7 @@ router.get(
         .limit(1);
 
       res.json({
-        binRegistration,
+        binRegistration: populatedBinRegistration,
         currentBill: currentBill || null,
         latestBill: latestBill || null,
       });
