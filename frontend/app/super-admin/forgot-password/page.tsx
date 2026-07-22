@@ -1,132 +1,193 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { ArrowLeft, Mail, Lock, AlertCircle, CheckCircle, Shield } from "lucide-react"
-import Link from "next/link"
-import { Logo } from "@/components/logo"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  ArrowLeft,
+  Mail,
+  Lock,
+  AlertCircle,
+  CheckCircle,
+  Shield,
+} from "lucide-react";
+import Link from "next/link";
+import { Logo } from "@/components/logo";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const INLINE_ALERT_TIMEOUT_MS = 6000;
 
 export default function SuperAdminForgotPasswordPage() {
-  const router = useRouter()
-  const [step, setStep] = useState<'email' | 'reset'>('email')
-  const [email, setEmail] = useState("")
-  const [resetCode, setResetCode] = useState("")
-  const [newPassword, setNewPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const router = useRouter();
+  const [step, setStep] = useState<"email" | "reset">("email");
+  const [email, setEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
+
+  useEffect(() => {
+    if (!error) return;
+
+    const timer = setTimeout(() => {
+      setError(null);
+    }, errorDismissMs);
+
+    return () => clearTimeout(timer);
+  }, [error, errorDismissMs]);
+
+  const showInlineError = (
+    message: string,
+    dismissAfterMs: number = INLINE_ALERT_TIMEOUT_MS,
+  ) => {
+    setErrorDismissMs(dismissAfterMs);
+    setError(message);
+  };
+
+  useEffect(() => {
+    if (!success) return;
+
+    const timer = setTimeout(() => {
+      setSuccess(null);
+    }, INLINE_ALERT_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [success]);
 
   const handleSendCode = async () => {
-    setIsLoading(true)
-    setError(null)
-    setSuccess(null)
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
 
     try {
       if (!email) {
-        setError("Email is required")
-        setIsLoading(false)
-        return
+        showInlineError("Email is required");
+        setIsLoading(false);
+        return;
       }
 
       const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
-      })
+      });
 
-      const data = await response.json()
+      const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to send reset code')
+        showInlineError(
+          data.error || "Failed to send reset code",
+          data.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
+        setIsLoading(false);
+        return;
       }
 
-      setSuccess("Password reset code sent to your super admin email!")
-      setStep('reset')
+      setSuccess("Password reset code sent to your super admin email!");
+      setStep("reset");
     } catch (err: any) {
-      setError(err.message || "Failed to send reset code")
+      showInlineError(err.message || "Failed to send reset code");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleResetPassword = async () => {
-    setIsLoading(true)
-    setError(null)
-    setSuccess(null)
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
 
     try {
       if (!resetCode || !newPassword || !confirmPassword) {
-        setError("All fields are required")
-        setIsLoading(false)
-        return
+        showInlineError("All fields are required");
+        setIsLoading(false);
+        return;
       }
 
       if (newPassword !== confirmPassword) {
-        setError("Passwords do not match")
-        setIsLoading(false)
-        return
+        showInlineError("Passwords do not match");
+        setIsLoading(false);
+        return;
       }
 
       if (newPassword.length < 8) {
-        setError("Password must be at least 8 characters")
-        setIsLoading(false)
-        return
+        showInlineError("Password must be at least 8 characters");
+        setIsLoading(false);
+        return;
       }
 
       const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, resetCode, newPassword }),
-      })
+      });
 
-      const data = await response.json()
+      const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to reset password')
+        showInlineError(
+          data.error || "Failed to reset password",
+          data.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+        );
+        setIsLoading(false);
+        return;
       }
 
-      setSuccess("Password reset successful! Redirecting to login...")
+      setSuccess("Password reset successful! Redirecting to login...");
       setTimeout(() => {
-        router.push('/super-admin/login')
-      }, 2000)
+        router.push("/super-admin/login");
+      }, 2000);
     } catch (err: any) {
-      setError(err.message || "Failed to reset password")
+      showInlineError(err.message || "Failed to reset password");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Link href="/super-admin/login" className="inline-flex items-center text-red-600 hover:text-red-700 mb-4">
+          <Link
+            href="/super-admin/login"
+            className="inline-flex items-center text-red-600 hover:text-red-700 mb-4"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Super Admin Login
           </Link>
           <Logo size="md" className="justify-center mb-4" />
           <div className="flex items-center justify-center mb-2">
             <Shield className="w-6 h-6 text-red-600 mr-2" />
-            <h1 className="text-2xl font-bold text-gray-900">Super Admin Password Reset</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Super Admin Password Reset
+            </h1>
           </div>
           <p className="text-gray-600">System Administrator Account Recovery</p>
         </div>
 
         <Card className="border-red-200">
           <CardHeader>
-            <CardTitle>{step === 'email' ? 'Request Reset Code' : 'Create New Password'}</CardTitle>
+            <CardTitle>
+              {step === "email" ? "Request Reset Code" : "Create New Password"}
+            </CardTitle>
             <CardDescription>
-              {step === 'email' 
-                ? 'Enter your super admin email to receive a password reset code' 
-                : 'Enter the code sent to your email and create a new password'}
+              {step === "email"
+                ? "Enter your super admin email to receive a password reset code"
+                : "Enter the code sent to your email and create a new password"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -144,7 +205,7 @@ export default function SuperAdminForgotPasswordPage() {
               </Alert>
             )}
 
-            {step === 'email' ? (
+            {step === "email" ? (
               <>
                 <div>
                   <Label htmlFor="email">Super Admin Email Address</Label>
@@ -162,7 +223,11 @@ export default function SuperAdminForgotPasswordPage() {
                   </div>
                 </div>
 
-                <Button onClick={handleSendCode} className="w-full bg-red-600 hover:bg-red-700" disabled={isLoading}>
+                <Button
+                  onClick={handleSendCode}
+                  className="w-full bg-red-600 hover:bg-red-700"
+                  disabled={isLoading}
+                >
                   {isLoading ? "Sending..." : "Send Reset Code"}
                 </Button>
               </>
@@ -212,14 +277,18 @@ export default function SuperAdminForgotPasswordPage() {
                   </div>
                 </div>
 
-                <Button onClick={handleResetPassword} className="w-full bg-red-600 hover:bg-red-700" disabled={isLoading}>
+                <Button
+                  onClick={handleResetPassword}
+                  className="w-full bg-red-600 hover:bg-red-700"
+                  disabled={isLoading}
+                >
                   {isLoading ? "Resetting..." : "Reset Password"}
                 </Button>
 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full"
-                  onClick={() => setStep('email')}
+                  onClick={() => setStep("email")}
                   disabled={isLoading}
                 >
                   Resend Code
@@ -231,10 +300,11 @@ export default function SuperAdminForgotPasswordPage() {
 
         <div className="mt-6 p-4 bg-red-50 rounded-lg border border-red-200">
           <p className="text-sm text-red-900">
-            <strong>Security Notice:</strong> This is a super administrator password reset. All actions are logged for security purposes.
+            <strong>Security Notice:</strong> This is a super administrator
+            password reset. All actions are logged for security purposes.
           </p>
         </div>
       </div>
     </div>
-  )
+  );
 }

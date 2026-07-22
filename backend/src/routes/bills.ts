@@ -19,6 +19,46 @@ import { BinRegistrationStatus } from "../models/BinRegistration";
 
 const router = Router();
 
+const normalizeBinIdInput = (value: string): string =>
+  value.trim().toUpperCase();
+
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const buildFlexibleBinIdRegex = (rawBinId: string): RegExp => {
+  const compact = rawBinId.replace(/[\s\-_/]/g, "");
+  const separatorPattern = "[\\s\\-_/]*";
+  const pattern = compact
+    .split("")
+    .map((char) => escapeRegex(char))
+    .join(separatorPattern);
+
+  return new RegExp(`^${pattern}$`, "i");
+};
+
+const findBinByFlexibleId = async (
+  rawBinId: string,
+  extraQuery: Record<string, any> = {},
+) => {
+  const normalized = normalizeBinIdInput(rawBinId);
+
+  let binRegistration = await BinRegistration.findOne({
+    binId: normalized,
+    ...extraQuery,
+  });
+
+  if (binRegistration) {
+    return binRegistration;
+  }
+
+  binRegistration = await BinRegistration.findOne({
+    binId: { $regex: buildFlexibleBinIdRegex(normalized) },
+    ...extraQuery,
+  });
+
+  return binRegistration;
+};
+
 // Get state billing information (public endpoint for users to see pricing)
 router.get("/state-billing/:stateCode", async (req, res) => {
   try {
@@ -168,15 +208,14 @@ router.post(
   validate([body("binId").notEmpty().trim()]),
   async (req: AuthRequest, res) => {
     try {
-      const { binId } = req.body;
+      const binId = normalizeBinIdInput(req.body.binId);
       const userId = req.user!.userId;
       console.log(
         `[BIN LINK] User ${userId} attempting to link binId: ${binId}`,
       );
 
       // Find the bin registration
-      const binRegistration = await BinRegistration.findOne({
-        binId,
+      const binRegistration = await findBinByFlexibleId(binId, {
         isActive: true,
       });
 
@@ -246,11 +285,10 @@ router.post(
   validate([body("binId").notEmpty().trim()]),
   async (req: AuthRequest, res) => {
     try {
-      const { binId } = req.body;
+      const binId = normalizeBinIdInput(req.body.binId);
       const userId = req.user!.userId;
 
-      const binRegistration = await BinRegistration.findOne({
-        binId,
+      const binRegistration = await findBinByFlexibleId(binId, {
         userId: userId,
         isActive: true,
       });
@@ -299,31 +337,65 @@ router.get(
   validate([param("binId").notEmpty()]),
   async (req: AuthRequest, res) => {
     try {
-      const { binId } = req.params;
+      const binId = normalizeBinIdInput(req.params.binId);
 
-      const binRegistration = await BinRegistration.findOne({ binId }).populate(
-        "userId",
-      );
+      const binRegistration = await findBinByFlexibleId(binId, {
+        isActive: true,
+      });
 
       if (!binRegistration) {
-        return res.status(404).json({ error: "Bin ID not found" });
+        return res.status(404).json({
+          error: "Bin ID not found",
+          dismissAfterMs: 6000,
+          severity: "warning",
+        });
       }
 
-      // Get current pending/overdue bill
+      if (!binRegistration.userId) {
+        return res.status(400).json({
+          error: "This bin is not linked to any account yet",
+          dismissAfterMs: 6000,
+          severity: "warning",
+        });
+      }
+
+      if (binRegistration.userId.toString() !== req.user!.userId) {
+        return res.status(403).json({
+          error:
+            "This bin is not linked to your account. Please link it to continue.",
+          dismissAfterMs: 7000,
+          severity: "warning",
+        });
+      }
+
+      const populatedBinRegistration = await binRegistration.populate("userId");
+
+      // Get current unpaid bill (supports legacy status values in older data)
       const currentBill = await Bill.findOne({
         binRegistrationId: binRegistration._id,
-        status: { $in: ["PENDING", "OVERDUE"] },
+        status: { $in: ["PENDING", "OVERDUE", "pending", "overdue"] },
       })
         .sort({ dueDate: 1 })
         .limit(1);
 
+      const latestBill = await Bill.findOne({
+        binRegistrationId: binRegistration._id,
+      })
+        .sort({ dueDate: -1 })
+        .limit(1);
+
       res.json({
-        binRegistration,
+        binRegistration: populatedBinRegistration,
         currentBill: currentBill || null,
+        latestBill: latestBill || null,
       });
     } catch (error) {
       console.error("Bill lookup error:", error);
-      res.status(500).json({ error: "Failed to lookup bill" });
+      res.status(500).json({
+        error: "Failed to lookup bill",
+        dismissAfterMs: 8000,
+        severity: "error",
+      });
     }
   },
 );
@@ -374,11 +446,10 @@ router.get(
   validate([param("binId").notEmpty()]),
   async (req: AuthRequest, res) => {
     try {
-      const { binId } = req.params;
+      const binId = normalizeBinIdInput(req.params.binId);
 
       // Find bin registration
-      const binRegistration = await BinRegistration.findOne({
-        binId,
+      const binRegistration = await findBinByFlexibleId(binId, {
         userId: req.user!.userId,
       });
 

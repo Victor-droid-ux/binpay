@@ -1,24 +1,35 @@
-import nodemailer from 'nodemailer';
+import nodemailer from "nodemailer";
+
+const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
+const smtpSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
 
 // Create reusable transporter
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false, // true for 465, false for other ports
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
+  port: smtpPort,
+  secure: smtpSecure,
+  connectionTimeout: 5000,
+  greetingTimeout: 5000,
+  socketTimeout: 10000,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 });
+// Verify SMTP configuration on startup in production, or when explicitly enabled.
+const shouldVerifyOnStartup =
+  process.env.EMAIL_VERIFY_ON_STARTUP === "true" ||
+  process.env.NODE_ENV === "production";
 
-// Verify connection configuration
-transporter.verify((error: any, success: any) => {
-  if (error) {
-    console.log('❌ Email service error:', error.message);
-  } else {
-    console.log('✅ Email service ready');
-  }
-});
+if (shouldVerifyOnStartup) {
+  transporter.verify((error: any) => {
+    if (error) {
+      console.log("❌ Email service error:", error.message);
+    } else {
+      console.log("✅ Email service ready");
+    }
+  });
+}
 
 export interface SendEmailOptions {
   to: string;
@@ -27,7 +38,9 @@ export interface SendEmailOptions {
   text?: string;
 }
 
-export const sendEmail = async (options: SendEmailOptions): Promise<boolean> => {
+export const sendEmail = async (
+  options: SendEmailOptions,
+): Promise<boolean> => {
   try {
     const info = await transporter.sendMail({
       from: `"Bin-Pay" <${process.env.SMTP_USER}>`,
@@ -37,15 +50,19 @@ export const sendEmail = async (options: SendEmailOptions): Promise<boolean> => 
       html: options.html,
     });
 
-    console.log('📧 Email sent:', info.messageId);
+    console.log("📧 Email sent:", info.messageId);
     return true;
   } catch (error: any) {
-    console.error('❌ Email send failed:', error.message);
+    console.error("❌ Email send failed:", error.message);
     return false;
   }
 };
 
-export const sendPasswordResetEmail = async (email: string, resetCode: string, userName: string): Promise<boolean> => {
+export const sendPasswordResetEmail = async (
+  email: string,
+  resetCode: string,
+  userName: string,
+): Promise<boolean> => {
   const html = `
     <!DOCTYPE html>
     <html>
@@ -119,13 +136,16 @@ export const sendPasswordResetEmail = async (email: string, resetCode: string, u
 
   return sendEmail({
     to: email,
-    subject: 'Bin-Pay Password Reset Code',
+    subject: "Bin-Pay Password Reset Code",
     html,
     text,
   });
 };
 
-export const sendWelcomeEmail = async (email: string, userName: string): Promise<boolean> => {
+export const sendWelcomeEmail = async (
+  email: string,
+  userName: string,
+): Promise<boolean> => {
   const html = `
     <!DOCTYPE html>
     <html>
@@ -174,9 +194,81 @@ export const sendWelcomeEmail = async (email: string, userName: string): Promise
 
   return sendEmail({
     to: email,
-    subject: 'Welcome to Bin-Pay!',
+    subject: "Welcome to Bin-Pay!",
     html,
     text: `Hello ${userName},\n\nWelcome to Bin-Pay!\n\nYour account has been successfully created.\n\nBest regards,\nThe Bin-Pay Team`,
+  });
+};
+
+export const sendEmailVerificationCode = async (
+  email: string,
+  verificationCode: string,
+  userName: string,
+): Promise<boolean> => {
+  const loginUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/login`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+        .content { background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }
+        .code-box { background: white; border: 2px solid #10b981; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; color: #10b981; letter-spacing: 5px; margin: 20px 0; border-radius: 8px; }
+        .warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; }
+        .button { display: inline-block; background: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 10px 0; }
+        .footer { text-align: center; color: #6b7280; font-size: 12px; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>🗑️ Verify Your Bin-Pay Email</h1>
+        </div>
+        <div class="content">
+          <h2>Hello ${userName},</h2>
+          <p>Thanks for creating your Bin-Pay account. Please verify your email address with this code:</p>
+          <div class="code-box">${verificationCode}</div>
+          <div class="warning">
+            <strong>⚠️ Important:</strong>
+            <ul>
+              <li>This code expires in <strong>15 minutes</strong></li>
+              <li>Enter this code only on Bin-Pay verification screens</li>
+              <li>If this wasn't you, you can safely ignore this email</li>
+            </ul>
+          </div>
+          <p style="text-align: center;">
+            <a href="${loginUrl}" class="button">Go to Bin-Pay</a>
+          </p>
+          <p>Best regards,<br><strong>The Bin-Pay Team</strong></p>
+        </div>
+        <div class="footer">
+          <p>© 2026 Bin-Pay. All rights reserved.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const text = `
+    Hello ${userName},
+
+    Thanks for creating your Bin-Pay account.
+    Your email verification code is: ${verificationCode}
+
+    This code expires in 15 minutes.
+
+    Best regards,
+    The Bin-Pay Team
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: "Verify your Bin-Pay email",
+    html,
+    text,
   });
 };
 
@@ -184,4 +276,5 @@ export default {
   sendEmail,
   sendPasswordResetEmail,
   sendWelcomeEmail,
+  sendEmailVerificationCode,
 };

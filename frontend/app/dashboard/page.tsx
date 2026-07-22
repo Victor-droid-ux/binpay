@@ -41,14 +41,20 @@ import {
   Trash2,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Eye,
   Loader2,
   LogOut,
   MapPin,
+  X,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { authApi, billsApi, paymentsApi, adminApi } from "@/lib/api";
 import { useToast, toast } from "@/hooks/use-toast";
+
+const BIN_FULL_BANNER_DISMISSED_KEY =
+  "binpay_dashboard_bin_full_banner_dismissed";
+const INLINE_ALERT_TIMEOUT_MS = 6000;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -68,6 +74,7 @@ export default function DashboardPage() {
   const [isLoadingPayments, setIsLoadingPayments] = useState(false);
   const [isLoadingBills, setIsLoadingBills] = useState(false);
   const [error, setError] = useState("");
+  const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
 
   const [stats, setStats] = useState({
     totalPaid: 0,
@@ -92,6 +99,13 @@ export default function DashboardPage() {
   const [hasSearched, setHasSearched] = useState(false);
   const [isRegisteringAddress, setIsRegisteringAddress] = useState(false);
   const [registeredBinId, setRegisteredBinId] = useState<string | null>(null);
+  const [showBinFullBanner, setShowBinFullBanner] = useState(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+
+    return localStorage.getItem(BIN_FULL_BANNER_DISMISSED_KEY) !== "true";
+  });
 
   // Notifications
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -103,6 +117,34 @@ export default function DashboardPage() {
     stateName: string;
     billCycle: string;
   } | null>(null);
+
+  const showInlineError = (
+    message: string,
+    dismissAfterMs: number = INLINE_ALERT_TIMEOUT_MS,
+  ) => {
+    setErrorDismissMs(dismissAfterMs);
+    setError(message);
+  };
+
+  useEffect(() => {
+    if (!error) return;
+
+    const timer = setTimeout(() => {
+      setError("");
+    }, errorDismissMs);
+
+    return () => clearTimeout(timer);
+  }, [error, errorDismissMs]);
+
+  useEffect(() => {
+    if (!registeredBinId) return;
+
+    const timer = setTimeout(() => {
+      setRegisteredBinId(null);
+    }, INLINE_ALERT_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [registeredBinId]);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -135,7 +177,7 @@ export default function DashboardPage() {
         try {
           const bins = await billsApi.getUserBins();
           if (!bins.bins || bins.bins.length === 0) {
-            setError(
+            showInlineError(
               "You are not linked to any bin. Go to Profile to register or link your address.",
             );
           }
@@ -230,7 +272,7 @@ export default function DashboardPage() {
 
   const handleAddressSearch = async () => {
     if (!addressSearch.address && !addressSearch.stateCode) {
-      setError("Please enter an address or select a state");
+      showInlineError("Please enter an address or select a state");
       return;
     }
     try {
@@ -241,7 +283,10 @@ export default function DashboardPage() {
       setSearchResults(response.results || []);
       setHasSearched(true);
     } catch (err: any) {
-      setError(err.message || "Failed to search addresses");
+      showInlineError(
+        err.message || "Failed to search addresses",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
       setSearchResults([]);
       setHasSearched(true);
     } finally {
@@ -262,7 +307,10 @@ export default function DashboardPage() {
     } catch (err: any) {
       let errorMsg = err?.message || "Failed to link bin";
       if (err?.data?.error) errorMsg = err.data.error;
-      setError(errorMsg);
+      showInlineError(
+        errorMsg,
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     }
   };
 
@@ -274,7 +322,10 @@ export default function DashboardPage() {
       await loadUserBins();
       showToast({ title: "Bin unlinked successfully" });
     } catch (err: any) {
-      setError(err.message || "Failed to unlink bin");
+      showInlineError(
+        err.message || "Failed to unlink bin",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     }
   };
 
@@ -283,7 +334,9 @@ export default function DashboardPage() {
   const handleRegisterAddress = async () => {
     const { address, lgaName } = addressSearch;
     if (!address || !lgaName) {
-      setError("Please enter both an address and select an LGA to register.");
+      showInlineError(
+        "Please enter both an address and select an LGA to register.",
+      );
       return;
     }
     try {
@@ -307,7 +360,10 @@ export default function DashboardPage() {
       // Reload notifications so the user can see any immediate feedback
       await loadNotifications();
     } catch (err: any) {
-      setError(err?.message || "Failed to register address");
+      showInlineError(
+        err?.message || "Failed to register address",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     } finally {
       setIsRegisteringAddress(false);
     }
@@ -331,20 +387,30 @@ export default function DashboardPage() {
       setError("");
       const response = await billsApi.getByBinId(billLookup.binId);
       if (!response.binRegistration) {
-        setError("Bin ID not found");
+        showInlineError("Bin ID not found");
         setFoundBill(null);
         return;
       }
       if (!response.currentBill) {
-        setError(
-          "No active bill found for this bin. Try linking it to your account.",
-        );
+        const latestStatus = response.latestBill?.status;
+        if (latestStatus) {
+          showInlineError(
+            `No unpaid bill found for this bin. Latest bill status: ${latestStatus}.`,
+          );
+        } else {
+          showInlineError(
+            "No bill found for this bin yet. Your state admin may need to generate one.",
+          );
+        }
         setFoundBill(null);
         return;
       }
       setFoundBill(response.currentBill);
     } catch (err: any) {
-      setError(err?.message || "Failed to lookup bill");
+      showInlineError(
+        err?.message || "Failed to lookup bill",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
       setFoundBill(null);
     }
   };
@@ -402,10 +468,13 @@ export default function DashboardPage() {
       if (response.paystack?.authorizationUrl) {
         window.location.href = response.paystack.authorizationUrl;
       } else {
-        setError("Failed to initialize payment. Please try again.");
+        showInlineError("Failed to initialize payment. Please try again.");
       }
     } catch (err: any) {
-      setError(err.message || "Failed to initialize payment");
+      showInlineError(
+        err.message || "Failed to initialize payment",
+        err?.data?.dismissAfterMs || INLINE_ALERT_TIMEOUT_MS,
+      );
     }
   };
 
@@ -548,35 +617,59 @@ export default function DashboardPage() {
         )}
 
         {/* Bin Full Alert Button */}
-        <Alert className="mb-6 border-yellow-600 bg-yellow-50">
-          <AlertDescription className="text-yellow-900">
-            <div className="flex justify-center">
-              <Button
-                className="bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 text-white font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 transition-all duration-200 text-lg flex items-center gap-2"
-                onClick={async () => {
-                  setError("");
-                  try {
-                    await adminApi.notifyBinFull();
-                    showToast({
-                      title: "Admin notified",
-                      description:
-                        "Your state admin has been notified that your bin is full.",
-                    });
-                  } catch (err: any) {
-                    let msg =
-                      err?.data?.error ||
-                      err?.message ||
-                      "Failed to notify state admin.";
-                    setError(msg);
-                  }
+        {showBinFullBanner && (
+          <div className="mb-6 rounded-lg border border-red-300 bg-red-50 p-3">
+            <div className="flex items-start sm:items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-800 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-red-800 leading-tight">
+                      Bin Full? Notify State Admin
+                    </p>
+                    <p className="text-sm text-red-900 mt-1 leading-tight">
+                      Send a quick alert so your state admin can arrange a
+                      pickup.
+                    </p>
+                  </div>
+                  <Button
+                    className="bg-red-700 hover:bg-red-800 text-white self-start sm:self-center shrink-0"
+                    onClick={async () => {
+                      setError("");
+                      try {
+                        await adminApi.notifyBinFull();
+                        showToast({
+                          title: "Admin notified",
+                          description:
+                            "Your state admin has been notified that your bin is full.",
+                        });
+                      } catch (err: any) {
+                        let msg =
+                          err?.data?.error ||
+                          err?.message ||
+                          "Failed to notify state admin.";
+                        setError(msg);
+                      }
+                    }}
+                  >
+                    Notify State Admin
+                  </Button>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Dismiss bin full notification"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-700 hover:bg-red-100 hover:text-red-900"
+                onClick={() => {
+                  setShowBinFullBanner(false);
+                  localStorage.setItem(BIN_FULL_BANNER_DISMISSED_KEY, "true");
                 }}
               >
-                <span>🗑️</span>
-                Bin Full? Notify State Admin
-              </Button>
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          </AlertDescription>
-        </Alert>
+          </div>
+        )}
 
         {/* Quick Stats — 2x2 on mobile, 4 across on desktop */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-10">
