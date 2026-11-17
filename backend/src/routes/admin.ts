@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import mongoose from "mongoose";
 import { body, param } from "express-validator";
 import {
   Bill,
@@ -24,6 +25,14 @@ import bcrypt from "bcryptjs";
 import { sendEmail } from "../services/email";
 import { sendSMS } from "../services/sms";
 import { BinRegistrationStatus } from "../models/BinRegistration";
+import {
+  AccountType,
+  ApprovalStatus,
+  isOrganizationType,
+} from "../utils/accountTypes";
+
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 const router = Router();
 
@@ -60,7 +69,7 @@ router.patch(
           await Notification.create({
             userId: user._id,
             title: "Address Approved ✅",
-            message: `Your address (${address.address}, ${address.lgaName}, ${address.stateCode}) has been approved. Your Bin ID is: ${address.binId}`,
+            message: `Your address (${address.address}, ${address.lgaName}, ${address.stateCode}) has been approved by your state admin. Your Bin ID ${address.binId} is now active.`,
             type: "ADDRESS_APPROVED",
             isRead: false,
             metadata: {
@@ -664,7 +673,7 @@ router.get(
       const [users, total] = await Promise.all([
         User.find(where)
           .select(
-            "email phone firstName lastName isActive isVerified lastLogin createdAt",
+            "email phone firstName lastName accountType organizationName approvalStatus isActive isVerified lastLogin createdAt",
           )
           .sort({ createdAt: -1 })
           .skip(skip)
@@ -700,6 +709,154 @@ router.get(
     } catch (error) {
       console.error("Get users error:", error);
       res.status(500).json({ error: "Failed to get users" });
+    }
+  },
+);
+
+// List organisation accounts (schools, industries, institutions) for a state
+router.get(
+  "/organizations/:stateCode",
+  authenticate,
+  authorizeStateAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      const { stateCode } = req.params;
+      const status = (req.query.status as string) || ApprovalStatus.PENDING;
+      const where: any = {
+        role: "USER",
+        stateCode,
+        accountType: { $ne: AccountType.INDIVIDUAL },
+      };
+      if (status !== "ALL") where.approvalStatus = status;
+
+      const organizations = await User.find(where)
+        .select(
+          "email phone firstName organizationName registrationNumber contactPersonName contactPersonPhone organizationCategory numberOfBins accountType approvalStatus approvalNote approvedAt createdAt",
+        )
+        .sort({ createdAt: -1 });
+
+      res.json({ organizations });
+    } catch (error) {
+      console.error("Get organizations error:", error);
+      res.status(500).json({ error: "Failed to get organisations" });
+    }
+  },
+);
+
+const loadOrganizationForReview = async (
+  req: AuthRequest,
+  res: Response,
+  userId: string,
+) => {
+  const org = await User.findById(userId);
+  if (!org || !isOrganizationType(org.accountType)) {
+    res.status(404).json({ error: "Organisation not found" });
+    return null;
+  }
+  if (
+    req.user!.role === "STATE_ADMIN" &&
+    org.stateCode !== req.user!.stateCode
+  ) {
+    res
+      .status(403)
+      .json({ error: "You do not have permission to review this account" });
+    return null;
+  }
+  return org;
+};
+
+router.patch(
+  "/organizations/:userId/approve",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  validate([param("userId").notEmpty()]),
+  async (req: AuthRequest, res) => {
+    try {
+      const org = await loadOrganizationForReview(req, res, req.params.userId);
+      if (!org) return;
+
+      org.approvalStatus = ApprovalStatus.APPROVED;
+      org.approvalNote = undefined;
+      org.approvedAt = new Date();
+      org.approvedBy = new mongoose.Types.ObjectId(req.user!.userId);
+      await org.save();
+
+      await Notification.create({
+        userId: org._id,
+        title: "Organisation Approved ✅",
+        message:
+          "Your organisation account has been approved. Billing will now start for your bins.",
+        type: "ORGANIZATION_APPROVED",
+        isRead: false,
+      });
+      void sendEmail({
+        to: org.email,
+        subject: "Your Bin-Pay organisation account is approved",
+        html: `<p>Dear ${org.organizationName || org.firstName},</p><p>Your organisation account has been approved. Billing will now start for your registered bins.</p><p>Bin-Pay Team</p>`,
+        text: `Dear ${org.organizationName || org.firstName},\n\nYour organisation account has been approved. Billing will now start for your registered bins.\n\nBin-Pay Team`,
+      });
+
+      // Bill any bins already linked so the first bill isn't delayed to the next cycle
+      const bins = await BinRegistration.find({
+        userId: org._id,
+        isActive: true,
+      });
+      for (const bin of bins) {
+        try {
+          await generateBillForBin(bin._id);
+        } catch (_) {
+          // Already billed for this period, or not billable yet
+        }
+      }
+
+      res.json({ message: "Organisation approved", organization: org });
+    } catch (error) {
+      console.error("Approve organisation error:", error);
+      res.status(500).json({ error: "Failed to approve organisation" });
+    }
+  },
+);
+
+router.patch(
+  "/organizations/:userId/reject",
+  authenticate,
+  authorize("STATE_ADMIN", "SUPER_ADMIN"),
+  validate([
+    param("userId").notEmpty(),
+    body("reason")
+      .trim()
+      .notEmpty()
+      .withMessage("A rejection reason is required"),
+  ]),
+  async (req: AuthRequest, res) => {
+    try {
+      const org = await loadOrganizationForReview(req, res, req.params.userId);
+      if (!org) return;
+
+      org.approvalStatus = ApprovalStatus.REJECTED;
+      org.approvalNote = req.body.reason;
+      org.approvedAt = undefined;
+      org.approvedBy = new mongoose.Types.ObjectId(req.user!.userId);
+      await org.save();
+
+      await Notification.create({
+        userId: org._id,
+        title: "Organisation Registration Rejected ❌",
+        message: `Your organisation registration was not approved. Reason: ${req.body.reason}`,
+        type: "ORGANIZATION_REJECTED",
+        isRead: false,
+      });
+      void sendEmail({
+        to: org.email,
+        subject: "Your Bin-Pay organisation registration was not approved",
+        html: `<p>Dear ${org.organizationName || org.firstName},</p><p>Your organisation registration was not approved.</p><p><b>Reason:</b> ${escapeHtml(req.body.reason)}</p><p>Please contact your state admin for more information.</p>`,
+        text: `Dear ${org.organizationName || org.firstName},\n\nYour organisation registration was not approved.\nReason: ${req.body.reason}\n\nPlease contact your state admin for more information.`,
+      });
+
+      res.json({ message: "Organisation rejected", organization: org });
+    } catch (error) {
+      console.error("Reject organisation error:", error);
+      res.status(500).json({ error: "Failed to reject organisation" });
     }
   },
 );
@@ -1175,7 +1332,11 @@ router.post(
         isActive: true,
       });
 
-      const notificationMessage = `New address registration submitted by ${submitter.firstName} ${submitter.lastName} (${submitter.email}) for approval: ${normalizedAddress}, ${lga.name}, ${state.code}`;
+      const submitterName =
+        submitter.organizationName ||
+        `${submitter.firstName} ${submitter.lastName}`.trim();
+      const submitterType = submitter.accountType || "INDIVIDUAL";
+      const notificationMessage = `New address registration submitted by ${submitterName} [${submitterType}] (${submitter.email}) for approval: ${normalizedAddress}, ${lga.name}, ${state.code}`;
 
       await Promise.all(
         stateAdmins.map(async (admin) => {
@@ -1207,12 +1368,12 @@ router.post(
                     <li><b>Address:</b> ${normalizedAddress}</li>
                     <li><b>LGA:</b> ${lga.name}</li>
                     <li><b>State:</b> ${state.name} (${state.code})</li>
-                    <li><b>Submitted by:</b> ${submitter.firstName} ${submitter.lastName} (${submitter.email})</li>
+                    <li><b>Submitted by:</b> ${submitterName} [${submitterType}] (${submitter.email})</li>
                     <li><b>Bin ID:</b> ${binRegistration.binId}</li>
                   </ul>
                   <p>Please review and approve/reject this address in your admin dashboard.</p>
                   <p>Thank you,<br/>Bin-Pay Team</p>`,
-              text: `New address registration from ${submitter.firstName} ${submitter.lastName}:\nAddress: ${normalizedAddress}\nLGA: ${lga.name}\nBin ID: ${binRegistration.binId}`,
+              text: `New address registration from ${submitterName} [${submitterType}]:\nAddress: ${normalizedAddress}\nLGA: ${lga.name}\nBin ID: ${binRegistration.binId}`,
             });
           }
         }),
@@ -1220,7 +1381,7 @@ router.post(
 
       res.status(201).json({
         message:
-          "Address registration submitted for approval. You will be notified once reviewed.",
+          "Address submitted for review. Your Bin ID will only become active, and billing will only start, after your state admin approves it. You will be notified.",
         binRegistration: {
           binId: binRegistration.binId,
           stateCode: binRegistration.stateCode,

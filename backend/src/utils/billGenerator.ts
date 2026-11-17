@@ -1,17 +1,21 @@
-import { Bill, BillStatus } from '../models/Bill';
-import { BinRegistration } from '../models/BinRegistration';
-import { State } from '../models/State';
-import { Notification } from '../models/Notification';
-import mongoose from 'mongoose';
+import { Bill, BillStatus } from "../models/Bill";
+import { BinRegistration } from "../models/BinRegistration";
+import { State } from "../models/State";
+import { Notification } from "../models/Notification";
+import { User } from "../models/User";
+import { getAccountTypeRate, ApprovalStatus } from "./accountTypes";
+import mongoose from "mongoose";
 
 /**
  * Generate a unique bill number
  * Format: BILL-STATECODE-YYYYMM-XXXXX
  */
-export const generateBillNumber = async (stateCode: string): Promise<string> => {
+export const generateBillNumber = async (
+  stateCode: string,
+): Promise<string> => {
   const now = new Date();
   const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, "0");
   const prefix = `BILL-${stateCode.toUpperCase()}-${year}${month}`;
 
   // Count existing bills with this prefix
@@ -19,7 +23,7 @@ export const generateBillNumber = async (stateCode: string): Promise<string> => 
     billNumber: new RegExp(`^${prefix}`),
   });
 
-  const sequence = String(count + 1).padStart(5, '0');
+  const sequence = String(count + 1).padStart(5, "0");
   return `${prefix}-${sequence}`;
 };
 
@@ -28,8 +32,18 @@ export const generateBillNumber = async (stateCode: string): Promise<string> => 
  */
 export const getBillingPeriod = (date: Date = new Date()): string => {
   const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
   ];
   return `${months[date.getMonth()]} ${date.getFullYear()}`;
 };
@@ -37,7 +51,10 @@ export const getBillingPeriod = (date: Date = new Date()): string => {
 /**
  * Calculate due date (default: 15 days from billing date)
  */
-export const calculateDueDate = (billingDate: Date = new Date(), daysUntilDue: number = 15): Date => {
+export const calculateDueDate = (
+  billingDate: Date = new Date(),
+  daysUntilDue: number = 15,
+): Date => {
   const dueDate = new Date(billingDate);
   dueDate.setDate(dueDate.getDate() + daysUntilDue);
   return dueDate;
@@ -52,22 +69,22 @@ export const generateBillForBin = async (
     billingDate?: Date;
     daysUntilDue?: number;
     customAmount?: number;
-  } = {}
+  } = {},
 ): Promise<any> => {
   const binRegistration = await BinRegistration.findById(binRegistrationId);
 
   if (!binRegistration) {
-    throw new Error('Bin registration not found');
+    throw new Error("Bin registration not found");
   }
 
   if (!binRegistration.userId) {
-    throw new Error('Bin is not linked to any user');
+    throw new Error("Bin is not linked to any user");
   }
 
   // Get state information for billing amount
   const state = await State.findOne({ code: binRegistration.stateCode });
   if (!state) {
-    throw new Error('State not found');
+    throw new Error("State not found");
   }
 
   const billingDate = options.billingDate || new Date();
@@ -86,8 +103,14 @@ export const generateBillForBin = async (
   // Generate bill number
   const billNumber = await generateBillNumber(binRegistration.stateCode);
 
-  // Calculate amount (use state's monthly bill amount or custom amount)
-  const amount = options.customAmount || state.monthlyBillAmount || state.averageBill;
+  // Amount is fixed by the bin owner's account type, not by state
+  const owner = await User.findById(binRegistration.userId).select(
+    "accountType approvalStatus",
+  );
+  if (owner && owner.approvalStatus !== ApprovalStatus.APPROVED) {
+    throw new Error("Account is not approved for billing yet");
+  }
+  const amount = options.customAmount || getAccountTypeRate(owner?.accountType);
 
   // Calculate due date
   const dueDate = calculateDueDate(billingDate, options.daysUntilDue);
@@ -112,9 +135,9 @@ export const generateBillForBin = async (
   // Create notification for the user
   await Notification.create({
     userId: binRegistration.userId,
-    title: 'New Monthly Bill',
+    title: "New Monthly Bill",
     message: `Your waste bin bill for ${billingPeriod} is now available. Amount: ₦${amount.toLocaleString()}. Due date: ${dueDate.toLocaleDateString()}.`,
-    type: 'NEW_BILL',
+    type: "NEW_BILL",
     isRead: false,
     metadata: {
       billId: bill._id,
@@ -136,21 +159,24 @@ export const generateMonthlyBillsForState = async (
   options: {
     billingDate?: Date;
     daysUntilDue?: number;
-  } = {}
+  } = {},
 ): Promise<{ generated: number; skipped: number; errors: string[] }> => {
   const state = await State.findOne({ code: stateCode });
   if (!state) {
-    throw new Error('State not found');
+    throw new Error("State not found");
   }
 
   const billingDate = options.billingDate || new Date();
   const billingPeriod = getBillingPeriod(billingDate);
 
-  // Get all active bin registrations for this state that are linked to users
+  // Get all active bin registrations for this state that are linked to approved users
+  const unapprovedIds = await User.find({
+    approvalStatus: { $ne: ApprovalStatus.APPROVED },
+  }).distinct("_id");
   const binRegistrations = await BinRegistration.find({
     stateCode,
     isActive: true,
-    userId: { $exists: true, $ne: null },
+    userId: { $nin: [...unapprovedIds, null] },
   });
 
   let generated = 0;
@@ -187,14 +213,22 @@ export const generateMonthlyBillsForAllStates = async (
   options: {
     billingDate?: Date;
     daysUntilDue?: number;
-  } = {}
-): Promise<Record<string, { generated: number; skipped: number; errors: string[] }>> => {
+  } = {},
+): Promise<
+  Record<string, { generated: number; skipped: number; errors: string[] }>
+> => {
   const states = await State.find({ isActive: true });
-  const results: Record<string, { generated: number; skipped: number; errors: string[] }> = {};
+  const results: Record<
+    string,
+    { generated: number; skipped: number; errors: string[] }
+  > = {};
 
   for (const state of states) {
     try {
-      results[state.code] = await generateMonthlyBillsForState(state.code, options);
+      results[state.code] = await generateMonthlyBillsForState(
+        state.code,
+        options,
+      );
     } catch (error: any) {
       results[state.code] = {
         generated: 0,
@@ -212,7 +246,7 @@ export const generateMonthlyBillsForAllStates = async (
  */
 export const updateOverdueBills = async (): Promise<number> => {
   const now = new Date();
-  
+
   const result = await Bill.updateMany(
     {
       status: BillStatus.PENDING,
@@ -220,7 +254,7 @@ export const updateOverdueBills = async (): Promise<number> => {
     },
     {
       $set: { status: BillStatus.OVERDUE },
-    }
+    },
   );
 
   return result.modifiedCount;

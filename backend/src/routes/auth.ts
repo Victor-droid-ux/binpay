@@ -15,6 +15,12 @@ import {
   sendWelcomeEmail,
 } from "../services/email";
 import { sendPasswordResetSMS, sendSMS } from "../services/sms";
+import {
+  AccountType,
+  ApprovalStatus,
+  ORGANIZATION_CATEGORIES,
+  isOrganizationType,
+} from "../utils/accountTypes";
 
 const router = Router();
 const VERIFICATION_CODE_EXPIRY_MS = 15 * 60 * 1000;
@@ -23,6 +29,12 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 
 const generateSixDigitCode = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
+
+const isIndividual = (_value: unknown, { req }: { req: any }) =>
+  !req.body.accountType || req.body.accountType === AccountType.INDIVIDUAL;
+
+const isOrganizationRequest = (_value: unknown, { req }: { req: any }) =>
+  isOrganizationType(req.body.accountType);
 
 const uiError = (
   error: string,
@@ -53,7 +65,10 @@ const buildAuthResponse = (user: any) => {
       phone: user.phone,
       firstName: user.firstName,
       lastName: user.lastName,
+      organizationName: user.organizationName,
       role: user.role,
+      accountType: user.accountType,
+      approvalStatus: user.approvalStatus,
       stateCode: user.stateCode,
     },
     accessToken,
@@ -70,8 +85,51 @@ router.post(
     body("password")
       .isLength({ min: 8 })
       .withMessage("Password must be at least 8 characters"),
-    body("firstName").notEmpty().trim(),
-    body("lastName").notEmpty().trim(),
+    body("firstName")
+      .if(isIndividual)
+      .notEmpty()
+      .withMessage("First name is required")
+      .trim(),
+    body("lastName")
+      .if(isIndividual)
+      .notEmpty()
+      .withMessage("Last name is required")
+      .trim(),
+    body("organizationName")
+      .if((_v, { req }) => !isIndividual(_v, { req }))
+      .notEmpty()
+      .withMessage("Registered organisation name is required")
+      .trim(),
+    body("registrationNumber")
+      .if(isOrganizationRequest)
+      .trim()
+      .notEmpty()
+      .withMessage("CAC / registration number is required")
+      .isLength({ min: 3, max: 30 })
+      .withMessage("Enter a valid registration number"),
+    body("contactPersonName")
+      .if(isOrganizationRequest)
+      .trim()
+      .notEmpty()
+      .withMessage("Contact person name is required"),
+    body("contactPersonPhone")
+      .if(isOrganizationRequest)
+      .matches(/^\+?[1-9]\d{1,14}$/)
+      .withMessage("Enter a valid contact person phone number"),
+    body("organizationCategory")
+      .if(isOrganizationRequest)
+      .custom((value, { req }) =>
+        (ORGANIZATION_CATEGORIES[req.body.accountType] || []).includes(value),
+      )
+      .withMessage("Select a valid organisation category"),
+    body("numberOfBins")
+      .if(isOrganizationRequest)
+      .isInt({ min: 1, max: 1000 })
+      .withMessage("Number of bins must be at least 1"),
+    body("accountType")
+      .optional()
+      .isIn(Object.values(AccountType))
+      .withMessage("Invalid account type"),
     body("stateCode").optional().isString(),
     body("lgaId").optional().isString(),
     body("address").optional().isString(),
@@ -84,20 +142,47 @@ router.post(
         password,
         firstName,
         lastName,
+        organizationName,
+        registrationNumber,
+        contactPersonName,
+        contactPersonPhone,
+        organizationCategory,
+        numberOfBins,
+        accountType,
         address,
         stateCode,
         lgaId,
       } = req.body;
 
       // Check if user exists
+      const isOrganization = isOrganizationType(accountType);
+      const normalizedRegNumber = isOrganization
+        ? String(registrationNumber).trim().toUpperCase()
+        : undefined;
       const existingUser = await User.findOne({
-        $or: [{ email }, { phone }],
+        $or: [
+          { email },
+          { phone },
+          ...(normalizedRegNumber
+            ? [{ registrationNumber: normalizedRegNumber }]
+            : []),
+        ],
       });
 
       if (existingUser) {
+        const regTaken =
+          normalizedRegNumber &&
+          existingUser.registrationNumber === normalizedRegNumber;
         return res
           .status(400)
-          .json(uiError("Email or phone already registered", 7000));
+          .json(
+            uiError(
+              regTaken
+                ? "This registration number is already registered"
+                : "Email or phone already registered",
+              7000,
+            ),
+          );
       }
 
       // Hash password
@@ -112,13 +197,27 @@ router.post(
         email,
         phone,
         password: hashedPassword,
-        firstName,
-        lastName,
+        // Organisations keep their name in firstName so greetings and emails still read correctly
+        firstName: isOrganization ? organizationName : firstName,
+        lastName: isOrganization ? "" : lastName,
+        organizationName: isOrganization ? organizationName : undefined,
+        registrationNumber: normalizedRegNumber,
+        contactPersonName: isOrganization ? contactPersonName : undefined,
+        contactPersonPhone: isOrganization
+          ? String(contactPersonPhone).replace(/\s/g, "")
+          : undefined,
+        organizationCategory: isOrganization ? organizationCategory : undefined,
+        numberOfBins: isOrganization ? Number(numberOfBins) : undefined,
+        // Organisations are billed only after a state admin approves them
+        approvalStatus: isOrganization
+          ? ApprovalStatus.PENDING
+          : ApprovalStatus.APPROVED,
         address,
         // FIX: store stateCode on user so address submissions work
         stateCode: stateCode || undefined,
         lgaId,
         role: "USER",
+        accountType: accountType || AccountType.INDIVIDUAL,
         emailVerified: false,
         emailVerificationCode: verificationCode,
         emailVerificationCodeExpiry: verificationCodeExpiry,
@@ -164,8 +263,11 @@ router.post(
           phone: user.phone,
           firstName: user.firstName,
           lastName: user.lastName,
+          organizationName: user.organizationName,
           address: user.address,
           role: user.role,
+          accountType: user.accountType,
+          approvalStatus: user.approvalStatus,
           stateCode: user.stateCode,
           emailVerified: user.emailVerified,
         },

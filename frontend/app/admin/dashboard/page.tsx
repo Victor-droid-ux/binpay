@@ -99,6 +99,7 @@ import {
 
 import { Logo } from "@/components/logo";
 import { NotificationTab } from "@/components/notification-tab";
+import { OrganizationApprovals } from "@/components/organization-approvals";
 import { adminApi, authApi, ApiError } from "@/lib/api";
 import {
   NIGERIAN_STATES,
@@ -115,6 +116,7 @@ export default function AdminDashboardPage() {
   // ─── State declarations ────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState("overview");
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDismissMs, setErrorDismissMs] = useState(INLINE_ALERT_TIMEOUT_MS);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -294,7 +296,7 @@ export default function AdminDashboardPage() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
+    authApi.logout();
     router.push("/admin/login");
   };
 
@@ -319,9 +321,11 @@ export default function AdminDashboardPage() {
             loadAddresses(),
           ]);
         }
+        setIsAuthenticated(true);
       } catch (err) {
         console.error("Auth/Data load error:", err);
         if (err instanceof ApiError && err.status === 401) {
+          authApi.logout();
           router.push("/admin/login");
         } else {
           showInlineError(
@@ -588,7 +592,7 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {!isInitialLoading && (
+      {!isInitialLoading && isAuthenticated && (
         <>
           {/* Header */}
           <header className="bg-white/90 border-b shadow-sm backdrop-blur-md">
@@ -647,16 +651,24 @@ export default function AdminDashboardPage() {
               onValueChange={setActiveTab}
               className="w-full"
             >
-              <TabsList className="grid w-full grid-cols-8">
+              <TabsList className="grid w-full grid-cols-9">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="map">State Map</TabsTrigger>
                 <TabsTrigger value="bills">Bills</TabsTrigger>
                 <TabsTrigger value="payments">Payments</TabsTrigger>
                 <TabsTrigger value="users">Registered Addresses</TabsTrigger>
+                <TabsTrigger value="organizations">Organisations</TabsTrigger>
                 <TabsTrigger value="notifications">Notifications</TabsTrigger>
                 <TabsTrigger value="reports">Reports</TabsTrigger>
                 <TabsTrigger value="settings">Settings</TabsTrigger>
               </TabsList>
+
+              {/* ── Notifications ── */}
+              <TabsContent value="organizations" className="mt-6">
+                <OrganizationApprovals
+                  stateCode={currentUser?.stateCode || ""}
+                />
+              </TabsContent>
 
               {/* ── Notifications ── */}
               <TabsContent value="notifications" className="mt-6">

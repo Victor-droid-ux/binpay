@@ -94,8 +94,15 @@ export const authApi = {
     email: string;
     phone: string;
     password: string;
-    firstName: string;
-    lastName: string;
+    firstName?: string;
+    lastName?: string;
+    organizationName?: string;
+    registrationNumber?: string;
+    contactPersonName?: string;
+    contactPersonPhone?: string;
+    organizationCategory?: string;
+    numberOfBins?: number;
+    accountType?: string;
     stateCode?: string;
     lgaId?: string;
     address?: string;
@@ -400,6 +407,28 @@ export const adminApi = {
     }
     return fetchApi(`/admin/users/${stateCode}?${params.toString()}`, {
       requiresAuth: true,
+    });
+  },
+
+  getOrganizations: async (stateCode: string, status: string = "PENDING") => {
+    return fetchApi(
+      `/admin/organizations/${stateCode}?status=${encodeURIComponent(status)}`,
+      { requiresAuth: true },
+    );
+  },
+
+  approveOrganization: async (userId: string) => {
+    return fetchApi(`/admin/organizations/${userId}/approve`, {
+      method: "PATCH",
+      requiresAuth: true,
+    });
+  },
+
+  rejectOrganization: async (userId: string, reason: string) => {
+    return fetchApi(`/admin/organizations/${userId}/reject`, {
+      method: "PATCH",
+      requiresAuth: true,
+      body: JSON.stringify({ reason }),
     });
   },
 

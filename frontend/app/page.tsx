@@ -60,6 +60,11 @@ export default function HomePage() {
       authority: "OGSEMA",
       color: "bg-indigo-100 text-indigo-800",
     },
+    {
+      name: "Nasarawa",
+      authority: "NASEMA",
+      color: "bg-teal-100 text-teal-800",
+    },
   ];
 
   return (

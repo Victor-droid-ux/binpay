@@ -1,48 +1,49 @@
 // Backend uses these exact values
-export type UserRole = "USER" | "STATE_ADMIN" | "SUPER_ADMIN"
+export type UserRole = "USER" | "STATE_ADMIN" | "SUPER_ADMIN";
 
 export interface User {
-  id: string
-  email: string
-  firstName: string
-  lastName: string
-  phone: string
-  role: UserRole
-  stateCode?: string // Only for STATE_ADMIN
-  isActive: boolean
-  createdAt: string
-  lastLogin?: string
-  permissions?: Permission[]
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  role: UserRole;
+  accountType?: "INDIVIDUAL" | "SCHOOL" | "INDUSTRY" | "INSTITUTION";
+  stateCode?: string; // Only for STATE_ADMIN
+  isActive: boolean;
+  createdAt: string;
+  lastLogin?: string;
+  permissions?: Permission[];
 }
 
 export interface Permission {
-  id: string
-  name: string
-  description: string
-  resource: string
-  action: string
+  id: string;
+  name: string;
+  description: string;
+  resource: string;
+  action: string;
 }
 
 export interface StateAdmin {
-  id: string
-  userId: string
-  stateCode: string
-  authorityName: string
-  permissions: StateAdminPermission[]
-  isActive: boolean
-  createdBy: string // Super admin ID
-  createdAt: string
-  lastLogin?: string
+  id: string;
+  userId: string;
+  stateCode: string;
+  authorityName: string;
+  permissions: StateAdminPermission[];
+  isActive: boolean;
+  createdBy: string; // Super admin ID
+  createdAt: string;
+  lastLogin?: string;
 }
 
 export interface StateAdminPermission {
-  id: string
-  name: string
-  description: string
-  canView: boolean
-  canCreate: boolean
-  canUpdate: boolean
-  canDelete: boolean
+  id: string;
+  name: string;
+  description: string;
+  canView: boolean;
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
 }
 
 export const DEFAULT_STATE_ADMIN_PERMISSIONS: StateAdminPermission[] = [
@@ -91,4 +92,4 @@ export const DEFAULT_STATE_ADMIN_PERMISSIONS: StateAdminPermission[] = [
     canUpdate: true,
     canDelete: false,
   },
-]
+];

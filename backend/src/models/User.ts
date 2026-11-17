@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { AccountType, ApprovalStatus } from "../utils/accountTypes";
 
 export enum UserRole {
   USER = "USER",
@@ -21,8 +22,19 @@ export interface IUser extends Document {
   password: string;
   firstName: string;
   lastName: string;
+  organizationName?: string;
+  registrationNumber?: string;
+  contactPersonName?: string;
+  contactPersonPhone?: string;
+  organizationCategory?: string;
+  numberOfBins?: number;
+  approvalStatus: ApprovalStatus;
+  approvalNote?: string;
+  approvedAt?: Date;
+  approvedBy?: mongoose.Types.ObjectId;
   address?: string; // Accepts any address format
   role: UserRole;
+  accountType: AccountType;
   stateCode?: string;
   permissions?: Permission[];
   isActive: boolean;
@@ -46,12 +58,38 @@ const userSchema = new Schema<IUser>(
     phone: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
+    lastName: {
+      type: String,
+      required: function (this: IUser) {
+        return this.accountType === AccountType.INDIVIDUAL;
+      },
+      default: "",
+    },
+    organizationName: { type: String },
+    registrationNumber: { type: String },
+    contactPersonName: { type: String },
+    contactPersonPhone: { type: String },
+    organizationCategory: { type: String },
+    numberOfBins: { type: Number, min: 1 },
+    // Existing and individual accounts are APPROVED by default
+    approvalStatus: {
+      type: String,
+      enum: Object.values(ApprovalStatus),
+      default: ApprovalStatus.APPROVED,
+    },
+    approvalNote: { type: String },
+    approvedAt: { type: Date },
+    approvedBy: { type: Schema.Types.ObjectId, ref: "User" },
     address: { type: String }, // Accepts any address format
     role: {
       type: String,
       enum: Object.values(UserRole),
       default: UserRole.USER,
+    },
+    accountType: {
+      type: String,
+      enum: Object.values(AccountType),
+      default: AccountType.INDIVIDUAL,
     },
     stateCode: { type: String },
     permissions: [
@@ -82,6 +120,6 @@ const userSchema = new Schema<IUser>(
 );
 
 userSchema.index({ stateCode: 1 });
-userSchema.index({ stateCode: 1 });
+userSchema.index({ registrationNumber: 1 }, { sparse: true });
 
 export const User = mongoose.model<IUser>("User", userSchema);

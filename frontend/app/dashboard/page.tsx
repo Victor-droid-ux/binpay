@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { authApi, billsApi, paymentsApi, adminApi } from "@/lib/api";
+import { ACCOUNT_TYPES } from "@/lib/account-types";
 import { useToast, toast } from "@/hooks/use-toast";
 
 const BIN_FULL_BANNER_DISMISSED_KEY =
@@ -331,6 +332,11 @@ export default function DashboardPage() {
 
   // FIX: address registration now a dedicated handler that calls billsApi.registerAddress
   // It no longer requires stateCode from the form — the backend reads it from the JWT token
+  const accountTypeInfo =
+    ACCOUNT_TYPES.find((t) => t.value === user?.accountType) ??
+    ACCOUNT_TYPES[0];
+  const isOrgAccount = accountTypeInfo.value !== "INDIVIDUAL";
+
   const handleRegisterAddress = async () => {
     const { address, lgaName } = addressSearch;
     if (!address || !lgaName) {
@@ -349,9 +355,12 @@ export default function DashboardPage() {
       });
       setRegisteredBinId(response.binRegistration?.binId || null);
       showToast({
-        title: "Address submitted for approval",
-        description:
-          "Your state admin will review and approve your address. You will be notified.",
+        title: "Address submitted for review",
+        description: `Your Bin ID will only become active, and billing will only start, after your state admin approves this address.${
+          user?.approvalStatus === "PENDING"
+            ? " Your organisation account must also be approved."
+            : ""
+        } You'll be notified once it's reviewed.`,
       });
       setShowAddressSearch(false);
       setHasSearched(false);
@@ -575,6 +584,27 @@ export default function DashboardPage() {
             </span>{" "}
             across Nigeria
           </p>
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            <Badge variant="secondary">{accountTypeInfo.label} account</Badge>
+            {isOrgAccount && user?.organizationCategory && (
+              <Badge variant="outline">
+                {String(user.organizationCategory).replace(/_/g, " ")}
+              </Badge>
+            )}
+            {isOrgAccount && user?.approvalStatus && (
+              <Badge
+                variant={
+                  user.approvalStatus === "APPROVED" ? "default" : "outline"
+                }
+              >
+                {user.approvalStatus === "APPROVED"
+                  ? "Approved"
+                  : user.approvalStatus === "PENDING"
+                    ? "Awaiting approval"
+                    : "Not approved"}
+              </Badge>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -589,16 +619,37 @@ export default function DashboardPage() {
           <Alert className="mb-6 border-green-600 bg-green-50">
             <CheckCircle className="h-4 w-4 text-green-600" />
             <AlertDescription className="text-green-900">
-              <span className="font-semibold">Address submitted!</span> Your Bin
-              ID is{" "}
-              <span className="font-mono font-bold">{registeredBinId}</span>.
-              You will be notified once approved by your state admin.{" "}
+              <span className="font-semibold">
+                Address submitted for review.
+              </span>{" "}
+              Your Bin ID{" "}
+              <span className="font-mono font-bold">{registeredBinId}</span> is
+              not active yet. It will only be activated, and billing will only
+              start, after your state admin approves it. You will be notified.{" "}
               <button
                 className="underline ml-2"
                 onClick={() => setRegisteredBinId(null)}
               >
                 Dismiss
               </button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {user?.approvalStatus === "PENDING" && (
+          <Alert className="mb-6 border-yellow-600 bg-yellow-50">
+            <AlertDescription className="text-yellow-900">
+              Your organisation account is awaiting approval by your state
+              admin. Bills will be generated once it is approved.
+            </AlertDescription>
+          </Alert>
+        )}
+        {user?.approvalStatus === "REJECTED" && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertDescription>
+              Your organisation registration was not approved
+              {user.approvalNote ? `: ${user.approvalNote}` : ""}. Please
+              contact your state admin.
             </AlertDescription>
           </Alert>
         )}
@@ -610,8 +661,12 @@ export default function DashboardPage() {
               <span className="font-semibold">
                 {stateBillingInfo.stateName} Monthly Billing:
               </span>{" "}
-              ₦{stateBillingInfo.monthlyBillAmount.toLocaleString()} per bin (
-              {stateBillingInfo.billCycle})
+              {(() => {
+                const type =
+                  ACCOUNT_TYPES.find((t) => t.value === user?.accountType) ??
+                  ACCOUNT_TYPES[0];
+                return `₦${type.amount.toLocaleString()} per bin (${type.label}, ${stateBillingInfo.billCycle})`;
+              })()}
             </AlertDescription>
           </Alert>
         )}
@@ -817,6 +872,7 @@ export default function DashboardPage() {
                         <SelectItem value="anambra">Anambra</SelectItem>
                         <SelectItem value="kano">Kano</SelectItem>
                         <SelectItem value="enugu">Enugu</SelectItem>
+                        <SelectItem value="nasarawa">Nasarawa</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1242,12 +1298,35 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label>Name</Label>
+                  <Label>{isOrgAccount ? "Organisation Name" : "Name"}</Label>
                   <Input
-                    defaultValue={`${user?.firstName || ""} ${user?.lastName || ""}`.trim()}
+                    defaultValue={
+                      isOrgAccount
+                        ? user?.organizationName || user?.firstName
+                        : `${user?.firstName || ""} ${user?.lastName || ""}`.trim()
+                    }
                     readOnly
                   />
                 </div>
+                <div>
+                  <Label>Account Type</Label>
+                  <Input defaultValue={accountTypeInfo.label} readOnly />
+                </div>
+                {isOrgAccount && (
+                  <>
+                    <div>
+                      <Label>CAC / Registration Number</Label>
+                      <Input defaultValue={user?.registrationNumber} readOnly />
+                    </div>
+                    <div>
+                      <Label>Contact Person</Label>
+                      <Input
+                        defaultValue={`${user?.contactPersonName || ""} (${user?.contactPersonPhone || ""})`}
+                        readOnly
+                      />
+                    </div>
+                  </>
+                )}
                 <div>
                   <Label>Email</Label>
                   <Input defaultValue={user?.email} readOnly />
@@ -1367,6 +1446,7 @@ export default function DashboardPage() {
                           <SelectItem value="enugu">Enugu</SelectItem>
                           <SelectItem value="rivers">Rivers</SelectItem>
                           <SelectItem value="anambra">Anambra</SelectItem>
+                          <SelectItem value="nasarawa">Nasarawa</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1464,8 +1544,9 @@ export default function DashboardPage() {
                           )}
                         </Button>
                         <p className="text-xs text-gray-400 text-center">
-                          Your state admin will review and approve your address.
-                          You'll be notified when done.
+                          Your state admin must approve this address before your
+                          Bin ID is activated and billing starts. You'll be
+                          notified when it's reviewed.
                         </p>
                       </div>
                     </div>

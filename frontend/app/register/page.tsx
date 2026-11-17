@@ -35,7 +35,38 @@ import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { NIGERIAN_STATES } from "@/lib/states-data";
 import { authApi, ApiError } from "@/lib/api";
+import {
+  ACCOUNT_TYPES,
+  AccountType,
+  CATEGORY_FIELD_LABEL,
+  ORGANIZATION_CATEGORIES,
+} from "@/lib/account-types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+
+const ACCOUNT_SECTION_COPY: Record<
+  AccountType,
+  { title: string; description: string }
+> = {
+  INDIVIDUAL: {
+    title: "Personal Information",
+    description: "Tell us about yourself to get started",
+  },
+  SCHOOL: {
+    title: "School Registration Information",
+    description:
+      "Provide your school's registered details and primary contact.",
+  },
+  INDUSTRY: {
+    title: "Industry Registration Information",
+    description:
+      "Provide your organisation's registered details and primary contact.",
+  },
+  INSTITUTION: {
+    title: "Institution Registration Information",
+    description:
+      "Provide your institution's registered details and primary contact.",
+  },
+};
 
 export default function RegisterPage() {
   const INLINE_ALERT_TIMEOUT_MS = 6000;
@@ -47,6 +78,13 @@ export default function RegisterPage() {
 
   const [step, setStep] = useState(verificationMode ? 2 : 1);
   const [formData, setFormData] = useState({
+    accountType: "INDIVIDUAL" as AccountType,
+    organizationName: "",
+    registrationNumber: "",
+    contactPersonName: "",
+    contactPersonPhone: "",
+    organizationCategory: "",
+    numberOfBins: "1",
     firstName: "",
     lastName: "",
     email: "",
@@ -140,7 +178,11 @@ export default function RegisterPage() {
   }, [didAutoResend, verificationEmailFromQuery, verificationMode]);
 
   const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+      ...(field === "accountType" ? { organizationCategory: "" } : {}),
+    }));
     // Clear error when user starts typing
     if (error) setError(null);
     if (successMessage) setSuccessMessage(null);
@@ -150,14 +192,56 @@ export default function RegisterPage() {
     ? NIGERIAN_STATES[formData.state]
     : null;
 
+  const isOrganization = formData.accountType !== "INDIVIDUAL";
+  const categoryOptions = isOrganization
+    ? ORGANIZATION_CATEGORIES[
+        formData.accountType as Exclude<AccountType, "INDIVIDUAL">
+      ]
+    : [];
+
   const validateForm = () => {
-    if (!formData.firstName.trim()) {
-      showInlineError("First name is required");
-      return false;
-    }
-    if (!formData.lastName.trim()) {
-      showInlineError("Last name is required");
-      return false;
+    if (isOrganization) {
+      if (!formData.organizationName.trim()) {
+        showInlineError("Registered organisation name is required");
+        return false;
+      }
+      if (formData.registrationNumber.trim().length < 3) {
+        showInlineError("Enter your CAC / registration number");
+        return false;
+      }
+      if (!formData.organizationCategory) {
+        showInlineError(
+          `Select your ${CATEGORY_FIELD_LABEL[
+            formData.accountType as Exclude<AccountType, "INDIVIDUAL">
+          ].toLowerCase()}`,
+        );
+        return false;
+      }
+      if (!formData.contactPersonName.trim()) {
+        showInlineError("Contact person name is required");
+        return false;
+      }
+      if (
+        !/^\+?[1-9]\d{1,14}$/.test(
+          formData.contactPersonPhone.replace(/\s/g, ""),
+        )
+      ) {
+        showInlineError("Enter a valid contact person phone number");
+        return false;
+      }
+      if (!(parseInt(formData.numberOfBins, 10) >= 1)) {
+        showInlineError("Number of bins must be at least 1");
+        return false;
+      }
+    } else {
+      if (!formData.firstName.trim()) {
+        showInlineError("First name is required");
+        return false;
+      }
+      if (!formData.lastName.trim()) {
+        showInlineError("Last name is required");
+        return false;
+      }
     }
     if (!formData.email.trim()) {
       showInlineError("Email is required");
@@ -219,8 +303,27 @@ export default function RegisterPage() {
         email: formData.email.trim(),
         phone: formData.phone.replace(/\s/g, ""),
         password: formData.password,
-        firstName: formData.firstName.trim(),
-        lastName: formData.lastName.trim(),
+        firstName: isOrganization ? undefined : formData.firstName.trim(),
+        lastName: isOrganization ? undefined : formData.lastName.trim(),
+        organizationName: isOrganization
+          ? formData.organizationName.trim()
+          : undefined,
+        registrationNumber: isOrganization
+          ? formData.registrationNumber.trim()
+          : undefined,
+        contactPersonName: isOrganization
+          ? formData.contactPersonName.trim()
+          : undefined,
+        contactPersonPhone: isOrganization
+          ? formData.contactPersonPhone.replace(/\s/g, "")
+          : undefined,
+        organizationCategory: isOrganization
+          ? formData.organizationCategory
+          : undefined,
+        numberOfBins: isOrganization
+          ? parseInt(formData.numberOfBins, 10)
+          : undefined,
+        accountType: formData.accountType,
         stateCode: formData.state,
         lgaId: formData.lga || undefined,
         address: formData.address.trim() || undefined,
@@ -398,10 +501,10 @@ export default function RegisterPage() {
             <CardHeader>
               <CardTitle className="flex items-center">
                 <User className="w-5 h-5 mr-2" />
-                Personal Information
+                {ACCOUNT_SECTION_COPY[formData.accountType].title}
               </CardTitle>
               <CardDescription>
-                Tell us about yourself to get started
+                {ACCOUNT_SECTION_COPY[formData.accountType].description}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -418,33 +521,169 @@ export default function RegisterPage() {
                 </Alert>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="firstName">First Name</Label>
-                  <Input
-                    id="firstName"
-                    value={formData.firstName}
-                    onChange={(e) =>
-                      handleInputChange("firstName", e.target.value)
-                    }
-                    placeholder="John"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="lastName">Last Name</Label>
-                  <Input
-                    id="lastName"
-                    value={formData.lastName}
-                    onChange={(e) =>
-                      handleInputChange("lastName", e.target.value)
-                    }
-                    placeholder="Doe"
-                  />
-                </div>
+              <div>
+                <Label htmlFor="accountType">Register as</Label>
+                <Select
+                  value={formData.accountType}
+                  onValueChange={(value) =>
+                    handleInputChange("accountType", value)
+                  }
+                >
+                  <SelectTrigger id="accountType">
+                    <SelectValue placeholder="Select account type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ACCOUNT_TYPES.map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        {type.label} - ₦{type.amount.toLocaleString()}/month
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
+              {isOrganization ? (
+                <>
+                  <div>
+                    <Label htmlFor="organizationName">
+                      Registered Organisation Name
+                    </Label>
+                    <Input
+                      id="organizationName"
+                      value={formData.organizationName}
+                      onChange={(e) =>
+                        handleInputChange("organizationName", e.target.value)
+                      }
+                      placeholder="As registered with CAC / the relevant authority"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="registrationNumber">
+                        CAC / Registration Number
+                      </Label>
+                      <Input
+                        id="registrationNumber"
+                        value={formData.registrationNumber}
+                        onChange={(e) =>
+                          handleInputChange(
+                            "registrationNumber",
+                            e.target.value,
+                          )
+                        }
+                        placeholder="e.g., RC1234567"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="organizationCategory">
+                        {
+                          CATEGORY_FIELD_LABEL[
+                            formData.accountType as Exclude<
+                              AccountType,
+                              "INDIVIDUAL"
+                            >
+                          ]
+                        }
+                      </Label>
+                      <Select
+                        value={formData.organizationCategory}
+                        onValueChange={(value) =>
+                          handleInputChange("organizationCategory", value)
+                        }
+                      >
+                        <SelectTrigger id="organizationCategory">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categoryOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="contactPersonName">Contact Person</Label>
+                      <Input
+                        id="contactPersonName"
+                        value={formData.contactPersonName}
+                        onChange={(e) =>
+                          handleInputChange("contactPersonName", e.target.value)
+                        }
+                        placeholder="Full name"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="contactPersonPhone">
+                        Contact Person Phone
+                      </Label>
+                      <Input
+                        id="contactPersonPhone"
+                        type="tel"
+                        value={formData.contactPersonPhone}
+                        onChange={(e) =>
+                          handleInputChange(
+                            "contactPersonPhone",
+                            e.target.value,
+                          )
+                        }
+                        placeholder="+234 800 123 4567"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="numberOfBins">Number of Bins</Label>
+                    <Input
+                      id="numberOfBins"
+                      type="number"
+                      min={1}
+                      value={formData.numberOfBins}
+                      onChange={(e) =>
+                        handleInputChange("numberOfBins", e.target.value)
+                      }
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Each bin is billed at your account rate. Your account is
+                      reviewed by the state admin before billing starts.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="firstName">First Name</Label>
+                    <Input
+                      id="firstName"
+                      value={formData.firstName}
+                      onChange={(e) =>
+                        handleInputChange("firstName", e.target.value)
+                      }
+                      placeholder="John"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="lastName">Last Name</Label>
+                    <Input
+                      id="lastName"
+                      value={formData.lastName}
+                      onChange={(e) =>
+                        handleInputChange("lastName", e.target.value)
+                      }
+                      placeholder="Doe"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div>
-                <Label htmlFor="email">Email Address</Label>
+                <Label htmlFor="email">
+                  {isOrganization
+                    ? "Registered Business Email Address"
+                    : "Email Address"}
+                </Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                   <Input
@@ -727,9 +966,14 @@ export default function RegisterPage() {
               </div>
               <CardTitle>Account Created Successfully!</CardTitle>
               <CardDescription>
-                Your email has been verified. You can now start paying your
-                waste bills
-                {selectedStateData && ` in ${selectedStateData.name} state`}.
+                Your email has been verified.{" "}
+                {isOrganization
+                  ? "Your organisation account is awaiting approval by the state admin. Billing starts once it is approved, and you will be notified."
+                  : `You can now start paying your waste bills${
+                      selectedStateData
+                        ? ` in ${selectedStateData.name} state`
+                        : ""
+                    }.`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

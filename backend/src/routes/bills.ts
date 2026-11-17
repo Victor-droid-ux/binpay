@@ -14,6 +14,7 @@ import { validate } from "../middleware/validator";
 import { sendNewBillSMS } from "../services/sms";
 import { generateBinId } from "../utils/binId";
 import { generateBillForBin } from "../utils/billGenerator";
+import { ACCOUNT_TYPE_RATES } from "../utils/accountTypes";
 import mongoose from "mongoose";
 import { BinRegistrationStatus } from "../models/BinRegistration";
 
@@ -74,6 +75,7 @@ router.get("/state-billing/:stateCode", async (req, res) => {
       stateCode: state.code,
       stateName: state.name,
       monthlyBillAmount: state.monthlyBillAmount || state.averageBill,
+      accountTypeRates: ACCOUNT_TYPE_RATES,
       billCycle: state.billCycle,
       authorityName: state.authorityName,
     });
